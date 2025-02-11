@@ -123,16 +123,19 @@ func (d *Datasource) query(_ context.Context, _ backend.PluginContext, query bac
 		return response
 	}
 
-	// Get time range values
-	From := query.TimeRange.From
-	To := query.TimeRange.To
 
-	// Get historical data with correct timestamps
-	historicalData, err := d.api.GetHistoricalData(qm.ObjectId, From, To)
-	if err != nil {
+
+		// Convert timestamps to Unix time in seconds
+		fromTime := query.TimeRange.From.Unix()
+		toTime := query.TimeRange.To.Unix()
+
+		// Get historical data with the Unix timestamps
+		historicalData, err := d.api.GetHistoricalData(qm.ObjectId, fromTime, toTime)
+		if err != nil {
 		response.Error = err
 		return response
-	}
+		}
+
 
 	// Check if we have any data
 	if len(historicalData.HistData) == 0 {
@@ -255,20 +258,6 @@ func (d *Datasource) CallResource(ctx context.Context, req *backend.CallResource
 			})
 		}
 		return d.handleGetChannel(sender, pathParts[1])
-	case "historical":
-		// Check if we have an objid in the path
-		if len(pathParts) < 2 {
-			errorResponse := map[string]string{"error": "missing objid parameter"}
-			errorJSON, _ := json.Marshal(errorResponse)
-			return sender.Send(&backend.CallResourceResponse{
-				Status: http.StatusBadRequest,
-				Headers: map[string][]string{
-					"Content-Type": {"application/json"},
-				},
-				Body: errorJSON,
-			})
-		}
-		return d.handleGetHistorical(sender, pathParts[1])
 	default:
 		return sender.Send(&backend.CallResourceResponse{
 			Status: http.StatusNotFound,
@@ -402,50 +391,4 @@ func (d *Datasource) handleGetChannel(sender backend.CallResourceResponseSender,
 	})
 }
 
-func (d *Datasource) handleGetHistorical(sender backend.CallResourceResponseSender, objid string) error {
-	if objid == "" {
-		errorResponse := map[string]string{"error": "missing objid parameter"}
-		errorJSON, _ := json.Marshal(errorResponse)
-		return sender.Send(&backend.CallResourceResponse{
-			Status: http.StatusBadRequest,
-			Headers: map[string][]string{
-				"Content-Type": {"application/json"},
-			},
-			Body: errorJSON,
-		})
-	}
 
-	historicalData, err := d.api.GetHistoricalData(objid, time.Now().Add(-24*time.Hour), time.Now())
-	if err != nil {
-		errorResponse := map[string]string{"error": err.Error()}
-		errorJSON, _ := json.Marshal(errorResponse)
-		return sender.Send(&backend.CallResourceResponse{
-			Status: http.StatusInternalServerError,
-			Headers: map[string][]string{
-				"Content-Type": {"application/json"},
-			},
-			Body: errorJSON,
-		})
-	}
-
-	body, err := json.Marshal(historicalData)
-	if err != nil {
-		errorResponse := map[string]string{"error": fmt.Sprintf("error marshaling historical data: %v", err)}
-		errorJSON, _ := json.Marshal(errorResponse)
-		return sender.Send(&backend.CallResourceResponse{
-			Status: http.StatusInternalServerError,
-			Headers: map[string][]string{
-				"Content-Type": {"application/json"},
-			},
-			Body: errorJSON,
-		})
-	}
-
-	return sender.Send(&backend.CallResourceResponse{
-		Status: http.StatusOK,
-		Headers: map[string][]string{
-			"Content-Type": {"application/json"},
-		},
-		Body: body,
-	})
-}

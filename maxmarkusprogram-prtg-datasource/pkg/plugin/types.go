@@ -1,5 +1,5 @@
 package plugin
-import "time"
+
 
 // PrtgTableListResponse represents the PRTG Table List API response
 type PrtgTableListResponse struct {
@@ -240,9 +240,9 @@ type queryModel struct {
 	IncludeGroupName  bool   `json:"includeGroupName"`
 	IncludeDeviceName bool   `json:"includeDeviceName"`
 	IncludeSensorName bool   `json:"includeSensorName"`
-	Groups            []string
+	Groups            []string 
 	Devices           []string
 	Sensors           []string
-	From			  time.Time
-	To				  time.Time
+	From			  int64  `json:"from"`	
+	To				  int64  `json:"to"`
 }
