@@ -200,8 +200,8 @@ type PrtgHistoricalDataResponse struct {
 }
 
 type PrtgValues struct {
-	Datetime string `json:"datetime" xml:"datetime"`
-	Value    map[string]interface{}
+	Datetime string                 `json:"datetime" xml:"datetime"`
+	Value    map[string]interface{} `json:"value" xml:"value"`
 }
 
 /* ##################################### QUERY MODEL #################################### */

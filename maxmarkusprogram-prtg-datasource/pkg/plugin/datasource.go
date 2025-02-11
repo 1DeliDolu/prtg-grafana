@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -76,22 +77,51 @@ func (d *Datasource) QueryData(ctx context.Context, req *backend.QueryDataReques
 	return response, nil
 }
 
+// parsePRTGDateTime parses PRTG datetime format "DD.MM.YYYY HH:mm:ss"
+func parsePRTGDateTime(datetime string) (time.Time, error) {
+	// Split date and time parts
+	parts := strings.Split(datetime, " ")
+	if len(parts) != 2 {
+		return time.Time{}, fmt.Errorf("invalid datetime format: %s", datetime)
+	}
+
+	datePart := parts[0]
+	timePart := parts[1]
+
+	// Parse date (DD.MM.YYYY)
+	dateParts := strings.Split(datePart, ".")
+	if len(dateParts) != 3 {
+		return time.Time{}, fmt.Errorf("invalid date format: %s", datePart)
+	}
+
+	day, _ := strconv.Atoi(dateParts[0])
+	month, _ := strconv.Atoi(dateParts[1])
+	year, _ := strconv.Atoi(dateParts[2])
+
+	// Parse time (HH:mm:ss)
+	timeParts := strings.Split(timePart, ":")
+	if len(timeParts) != 3 {
+		return time.Time{}, fmt.Errorf("invalid time format: %s", timePart)
+	}
+
+	hour, _ := strconv.Atoi(timeParts[0])
+	minute, _ := strconv.Atoi(timeParts[1])
+	second, _ := strconv.Atoi(timeParts[2])
+
+	// Create time.Time object in local timezone
+	return time.Date(year, time.Month(month), day, hour, minute, second, 0, time.Local), nil
+}
+
 func (d *Datasource) query(_ context.Context, _ backend.PluginContext, query backend.DataQuery) backend.DataResponse {
 	var response backend.DataResponse
 	var qm queryModel
 
-	// Unmarshal the JSON into our queryModel
 	err := json.Unmarshal(query.JSON, &qm)
 	if err != nil {
 		return backend.ErrDataResponse(backend.StatusBadRequest, fmt.Sprintf("json unmarshal: %v", err.Error()))
 	}
 
-	// Debug print
 	fmt.Printf("Query Model: %+v\n", qm)
-	fmt.Printf("Time Range: From=%v To=%v\n", query.TimeRange.From, query.TimeRange.To)
-
-	// Create data frame
-	frame := data.NewFrame("response")
 
 	switch qm.QueryType {
 	case "metrics":
@@ -99,88 +129,80 @@ func (d *Datasource) query(_ context.Context, _ backend.PluginContext, query bac
 			return backend.ErrDataResponse(backend.StatusBadRequest, "missing objid parameter")
 		}
 
-		historicalData, err := d.api.GetHistoricalData(qm.ObjectId, query.TimeRange.From, query.TimeRange.To)
+		historicalData, err := d.api.GetHistoricalData(qm.ObjectId, query.TimeRange.From, query.TimeRange.To, "Antwortzeit")
 		if err != nil {
-			return backend.ErrDataResponse(backend.StatusInternal, fmt.Sprintf("error fetching historical data: %v", err))
+			return backend.ErrDataResponse(backend.StatusBadRequest, err.Error())
 		}
 
-		// Create time and value slices
-		times := make([]time.Time, 0, len(historicalData.HistData))
-		values := make([]float64, 0, len(historicalData.HistData))
+		// Create data frame
+		frame := data.NewFrame("response")
+		frame.RefID = query.RefID
 
-		// Process the historical data
-		for _, data := range historicalData.HistData {
-			// Parse PRTG's datetime format
-			parsedTime, err := time.Parse("2006-01-02-15-04-05", data.Datetime)
+		// Create slices for the data
+		times := make([]time.Time, 0)
+		values := make([]float64, 0)
+
+		// Process historical data
+		for _, point := range historicalData.HistData {
+			timestamp, err := parsePRTGDateTime(point.Datetime)
 			if err != nil {
-				fmt.Printf("Warning: Failed to parse time '%s': %v\n", data.Datetime, err)
+				fmt.Printf("Warning: Failed to parse time '%s': %v\n", point.Datetime, err)
 				continue
 			}
 
-			if value, ok := d.extractValue(data.Value, qm.Channel); ok {
-				times = append(times, parsedTime)
-				values = append(values, value)
-				fmt.Printf("Added datapoint: time=%v value=%v\n", parsedTime, value)
+			// Try to get "Antwortzeit" value
+			if responseTime, ok := point.Value["Antwortzeit"]; ok {
+				if floatVal, ok := responseTime.(float64); ok {
+					times = append(times, timestamp)
+					values = append(values, floatVal)
+					fmt.Printf("Added response time: time=%v value=%v\n", timestamp, floatVal)
+				}
 			}
 		}
 
-		if len(times) == 0 {
-			return backend.ErrDataResponse(backend.StatusInternal, "no valid data points found")
-		}
-
-		// Add fields to the frame
+		// Add fields to frame
 		frame.Fields = append(frame.Fields,
 			data.NewField("time", nil, times),
 			data.NewField("value", nil, values).SetConfig(&data.FieldConfig{
-				DisplayName: d.createDisplayName(qm),
+				DisplayName: "Response Time",
+				Unit:       "ms", // Set unit to milliseconds
 			}),
 		)
+
+		response.Frames = append(response.Frames, frame)
+		return response
 
 	default:
 		return backend.ErrDataResponse(backend.StatusBadRequest, fmt.Sprintf("unknown query type: %s", qm.QueryType))
 	}
-
-	response.Frames = append(response.Frames, frame)
-	return response
-}
-
-// Add this helper function to try multiple time formats
-func parseMultipleTimeFormats(timeStr string) (time.Time, error) {
-	formats := []string{
-		"2006-01-02 15:04:05",
-		"2006-01-03-15-04-05",
-	}
-
-	for _, format := range formats {
-		if t, err := time.Parse(format, timeStr); err == nil {
-			return t, nil
-		}
-	}
-
-	return time.Time{}, fmt.Errorf("could not parse time string: %s", timeStr)
 }
 
 func (d *Datasource) extractValue(values map[string]interface{}, channel string) (float64, bool) {
-	if channel != "" && channel != "*" {
-		// Look for specific channel
-		for k, v := range values {
-			if strings.EqualFold(k, channel) {
-				if fVal, ok := v.(float64); ok {
-					return fVal, true
-				}
-			}
+	if channel == "" {
+		return 0, false
+	}
+
+	// Direct lookup first
+	if val, ok := values[channel]; ok {
+		if fVal, ok := val.(float64); ok {
+			return fVal, true
 		}
-	} else {
-		// Take first numeric value
-		for _, v := range values {
+	}
+
+	// Case-insensitive lookup as fallback
+	lowerChannel := strings.ToLower(channel)
+	for k, v := range values {
+		if strings.ToLower(k) == lowerChannel {
 			if fVal, ok := v.(float64); ok {
 				return fVal, true
 			}
 		}
 	}
+
 	return 0, false
 }
 
+// ! OK createDisplayName creates a display name for the given query model
 func (d *Datasource) createDisplayName(qm queryModel) string {
 	parts := []string{}
 	if qm.ObjectId != "" {
@@ -201,28 +223,7 @@ func (d *Datasource) createDisplayName(qm queryModel) string {
 	return strings.Join(parts, " - ")
 }
 
-// extractFilterProperties extracts the filter properties from the given data
-func extractFilterProperties(data interface{}, _ string) []string {
-	var filterProperties []string
-	switch v := data.(type) {
-	case []Group:
-		filterProperties = make([]string, len(v))
-		for i, item := range v {
-			filterProperties[i] = item.Group
-		}
-	case []Device:
-		filterProperties = make([]string, len(v))
-		for i, item := range v {
-			filterProperties[i] = item.Device
-		}
-	case []Sensor:
-		filterProperties = make([]string, len(v))
-		for i, item := range v {
-			filterProperties[i] = item.Sensor
-		}
-	}
-	return filterProperties
-}
+
 
 /* ########################################## CHECK HEALTH  ############################################ */
 
@@ -439,7 +440,7 @@ func (d *Datasource) handleGetHistorical(sender backend.CallResourceResponseSend
 		})
 	}
 
-	historicalData, err := d.api.GetHistoricalData(objid, time.Now().Add(-24*time.Hour), time.Now())
+	historicalData, err := d.api.GetHistoricalData(objid, time.Now().Add(-24*time.Hour), time.Now(), "")
 	if err != nil {
 		errorResponse := map[string]string{"error": err.Error()}
 		errorJSON, _ := json.Marshal(errorResponse)
@@ -454,7 +455,7 @@ func (d *Datasource) handleGetHistorical(sender backend.CallResourceResponseSend
 
 	body, err := json.Marshal(historicalData)
 	if err != nil {
-		errorResponse := map[string]string{"error": fmt.Sprintf("error marshaling historical data: %v")}
+		errorResponse := map[string]string{"error": fmt.Sprintf("error marshaling historical data: %v", err)}
 		errorJSON, _ := json.Marshal(errorResponse)
 		return sender.Send(&backend.CallResourceResponse{
 			Status: http.StatusInternalServerError,
