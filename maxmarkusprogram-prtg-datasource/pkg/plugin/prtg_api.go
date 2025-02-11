@@ -205,18 +205,20 @@ func (a *Api) GetChannels(objid string) (*PrtgChannelValueStruct, error) {
 }
 
 // GetHistoricalData retrieves historical data for the given sensor ID and time range
-func (a *Api) GetHistoricalData(sensorID string, startDate, endDate time.Time) (*PrtgHistoricalDataResponse, error) {
+func (a *Api) GetHistoricalData(sensorID string, startDate, endDate int64) (*PrtgHistoricalDataResponse, error) {
 	if sensorID == "" {
 		return nil, fmt.Errorf("invalid query: missing sensor ID")
 	}
+	// Convert Unix timestamps to time.Time
+	startUTC := time.Unix(startDate, 0)
+	endUTC := time.Unix(endDate, 0)
 
-	// Ensure we're working with UTC times
-	startUTC := startDate.UTC()
-	endUTC := endDate.UTC()
+	// format dates in PRTG format (YYYY-MM-DD-HH-mm-ss)
+	format := "2006-01-02-15-04-05"
 
 	// Format dates in PRTG format (YYYY-MM-DD-HH-mm-ss)
-	sdate := startUTC.Format("2006-01-02-15-04-05")
-	edate := endUTC.Format("2006-01-02-15-04-05")
+	sdate := startUTC.Format(format)
+	edate := endUTC.Format(format)
 
 	// Calculate hours difference
 	hours := endUTC.Sub(startUTC).Hours()
