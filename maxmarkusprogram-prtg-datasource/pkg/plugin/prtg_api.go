@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"strings"
 	"time"
 )
 
@@ -206,15 +205,21 @@ func (a *Api) GetChannels(objid string) (*PrtgChannelValueStruct, error) {
 }
 
 // GetHistoricalData retrieves historical data for the given sensor ID and time range
-func (a *Api) GetHistoricalData(sensorID string, startDate, endDate time.Time, channel string) (*PrtgHistoricalDataResponse, error) {
+func (a *Api) GetHistoricalData(sensorID string, startDate, endDate time.Time) (*PrtgHistoricalDataResponse, error) {
 	if sensorID == "" {
 		return nil, fmt.Errorf("invalid query: missing sensor ID")
 	}
 
-	// Format dates and calculate interval
-	sdate := startDate.Format("2006-01-02-15-04-05")
-	edate := endDate.Format("2006-01-02-15-04-05")
-	hours := endDate.Sub(startDate).Hours()
+	// Ensure we're working with UTC times
+	startUTC := startDate.UTC()
+	endUTC := endDate.UTC()
+
+	// Format dates in PRTG format (YYYY-MM-DD-HH-mm-ss)
+	sdate := startUTC.Format("2006-01-02-15-04-05")
+	edate := endUTC.Format("2006-01-02-15-04-05")
+
+	// Calculate hours difference
+	hours := endUTC.Sub(startUTC).Hours()
 
 	// Determine averaging interval
 	var avg string
@@ -228,6 +233,10 @@ func (a *Api) GetHistoricalData(sensorID string, startDate, endDate time.Time, c
 	default:
 		avg = "0"
 	}
+
+	// Debug timestamps
+	fmt.Printf("Start date: %v (%s)\n", startUTC, sdate)
+	fmt.Printf("End date: %v (%s)\n", endUTC, edate)
 
 	// Build parameters
 	params := map[string]string{
@@ -245,62 +254,14 @@ func (a *Api) GetHistoricalData(sensorID string, startDate, endDate time.Time, c
 		return nil, fmt.Errorf("failed to fetch historical data: %w", err)
 	}
 
-	// Debug raw response
-	fmt.Printf("Raw historical data response: %s\n", string(body))
-
 	var response PrtgHistoricalDataResponse
 	if err := json.Unmarshal(body, &response); err != nil {
-		return nil, fmt.Errorf("failed to parse historical data response: %w", err)
+		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
-
-	// If no channel specified, return all data
-	if channel == "" {
-		return &response, nil
+	// check time and print first datetime if available
+	if len(response.HistData) == 0 {
+		return nil, fmt.Errorf("no data found for the given time range")
 	}
-
-	// Filter data for specific channel
-	filteredData := make([]PrtgValues, 0)
-	for _, data := range response.HistData {
-		// Debug print values
-		fmt.Printf("Processing data point: datetime=%s, values=%+v\n", data.Datetime, data.Value)
-
-		// Try both exact and case-insensitive match
-		value, found := data.Value[channel]
-		if !found {
-			// Try case-insensitive search
-			lowerChannel := strings.ToLower(channel)
-			for k, v := range data.Value {
-				if strings.ToLower(k) == lowerChannel {
-					value = v
-					found = true
-					break
-				}
-			}
-		}
-
-		if found {
-			filteredData = append(filteredData, PrtgValues{
-				Datetime: data.Datetime,
-				Value:    map[string]interface{}{channel: value},
-			})
-		}
-	}
-
-	// Debug print filtered data
-	fmt.Printf("Filtered data points: %d\n", len(filteredData))
-
-	if len(filteredData) == 0 {
-		// Return empty response instead of error
-		return &PrtgHistoricalDataResponse{
-			PrtgVersion: response.PrtgVersion,
-			TreeSize:    response.TreeSize,
-			HistData:    []PrtgValues{},
-		}, nil
-	}
-
-	return &PrtgHistoricalDataResponse{
-		PrtgVersion: response.PrtgVersion,
-		TreeSize:    response.TreeSize,
-		HistData:    filteredData,
-	}, nil
+	fmt.Printf("First datetime in response: %s\n", response.HistData[0].Datetime)
+	return &response, nil
 }

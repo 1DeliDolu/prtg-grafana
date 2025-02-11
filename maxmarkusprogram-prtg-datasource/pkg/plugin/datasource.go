@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -77,12 +76,15 @@ func (d *Datasource) QueryData(ctx context.Context, req *backend.QueryDataReques
 	return response, nil
 }
 
-// parsePRTGDateTime parses PRTG datetime format "DD.MM.YYYY HH:mm:ss"
-func parsePRTGDateTime(datetime string) (time.Time, error) {
+// parsePRTGDateTime parses PRTG datetime format "DD.MM.YYYY HH:mm:ss" and converts to "YYYY-MM-DD HH:mm:ss"
+func parsePRTGDateTime(datetime string) (string, error) {
+	// Remove any 'Z' suffix if present
+	datetime = strings.TrimSuffix(datetime, "Z")
+
 	// Split date and time parts
 	parts := strings.Split(datetime, " ")
 	if len(parts) != 2 {
-		return time.Time{}, fmt.Errorf("invalid datetime format: %s", datetime)
+		return "", fmt.Errorf("invalid datetime format: %s", datetime)
 	}
 
 	datePart := parts[0]
@@ -91,25 +93,20 @@ func parsePRTGDateTime(datetime string) (time.Time, error) {
 	// Parse date (DD.MM.YYYY)
 	dateParts := strings.Split(datePart, ".")
 	if len(dateParts) != 3 {
-		return time.Time{}, fmt.Errorf("invalid date format: %s", datePart)
+		return "", fmt.Errorf("invalid date format: %s", datePart)
 	}
 
-	day, _ := strconv.Atoi(dateParts[0])
-	month, _ := strconv.Atoi(dateParts[1])
-	year, _ := strconv.Atoi(dateParts[2])
+	// Convert to YYYY-MM-DD format
+	formattedDate := fmt.Sprintf("%s-%s-%s", dateParts[2], dateParts[1], dateParts[0])
 
 	// Parse time (HH:mm:ss)
 	timeParts := strings.Split(timePart, ":")
 	if len(timeParts) != 3 {
-		return time.Time{}, fmt.Errorf("invalid time format: %s", timePart)
+		return "", fmt.Errorf("invalid time format: %s", timePart)
 	}
 
-	hour, _ := strconv.Atoi(timeParts[0])
-	minute, _ := strconv.Atoi(timeParts[1])
-	second, _ := strconv.Atoi(timeParts[2])
-
-	// Create time.Time object in local timezone
-	return time.Date(year, time.Month(month), day, hour, minute, second, 0, time.Local), nil
+	// Combine date and time
+	return formattedDate + " " + timePart, nil
 }
 
 func (d *Datasource) query(_ context.Context, _ backend.PluginContext, query backend.DataQuery) backend.DataResponse {
@@ -121,109 +118,87 @@ func (d *Datasource) query(_ context.Context, _ backend.PluginContext, query bac
 		return backend.ErrDataResponse(backend.StatusBadRequest, fmt.Sprintf("json unmarshal: %v", err.Error()))
 	}
 
-	fmt.Printf("Query Model: %+v\n", qm)
-
-	switch qm.QueryType {
-	case "metrics":
-		if qm.ObjectId == "" {
-			return backend.ErrDataResponse(backend.StatusBadRequest, "missing objid parameter")
-		}
-
-		historicalData, err := d.api.GetHistoricalData(qm.ObjectId, query.TimeRange.From, query.TimeRange.To, "Antwortzeit")
-		if err != nil {
-			return backend.ErrDataResponse(backend.StatusBadRequest, err.Error())
-		}
-
-		// Create data frame
-		frame := data.NewFrame("response")
-		frame.RefID = query.RefID
-
-		// Create slices for the data
-		times := make([]time.Time, 0)
-		values := make([]float64, 0)
-
-		// Process historical data
-		for _, point := range historicalData.HistData {
-			timestamp, err := parsePRTGDateTime(point.Datetime)
-			if err != nil {
-				fmt.Printf("Warning: Failed to parse time '%s': %v\n", point.Datetime, err)
-				continue
-			}
-
-			// Try to get "Antwortzeit" value
-			if responseTime, ok := point.Value["Antwortzeit"]; ok {
-				if floatVal, ok := responseTime.(float64); ok {
-					times = append(times, timestamp)
-					values = append(values, floatVal)
-					fmt.Printf("Added response time: time=%v value=%v\n", timestamp, floatVal)
-				}
-			}
-		}
-
-		// Add fields to frame
-		frame.Fields = append(frame.Fields,
-			data.NewField("time", nil, times),
-			data.NewField("value", nil, values).SetConfig(&data.FieldConfig{
-				DisplayName: "Response Time",
-				Unit:       "ms", // Set unit to milliseconds
-			}),
-		)
-
-		response.Frames = append(response.Frames, frame)
+	// Check required parameters
+	if qm.ObjectId == "" || qm.Channel == "" {
 		return response
-
-	default:
-		return backend.ErrDataResponse(backend.StatusBadRequest, fmt.Sprintf("unknown query type: %s", qm.QueryType))
-	}
-}
-
-func (d *Datasource) extractValue(values map[string]interface{}, channel string) (float64, bool) {
-	if channel == "" {
-		return 0, false
 	}
 
-	// Direct lookup first
-	if val, ok := values[channel]; ok {
-		if fVal, ok := val.(float64); ok {
-			return fVal, true
+	// Get time range values
+	from := query.TimeRange.From
+	to := query.TimeRange.To
+
+	// Get historical data with correct timestamps
+	historicalData, err := d.api.GetHistoricalData(qm.ObjectId, from, to)
+	if err != nil {
+		response.Error = err
+		return response
+	}
+
+	// Check if we have any data
+	if len(historicalData.HistData) == 0 {
+		response.Error = fmt.Errorf("no data found for sensor")
+		return response
+	}
+
+	// Create frame
+	frame := data.NewFrame("response")
+
+	// Extract the requested parameter values based on datetime and value
+	times := make([]time.Time, len(historicalData.HistData))
+	values := make([]float64, len(historicalData.HistData))
+
+	// Process data points
+	for i := range historicalData.HistData {
+		// Parse date in PRTG format using our custom parser
+		formattedDateTime, err := parsePRTGDateTime(historicalData.HistData[i].Datetime)
+		if err != nil {
+			fmt.Printf("Warning: Failed to parse time '%s': %v\n", historicalData.HistData[i].Datetime, err)
+			continue
 		}
-	}
 
-	// Case-insensitive lookup as fallback
-	lowerChannel := strings.ToLower(channel)
-	for k, v := range values {
-		if strings.ToLower(k) == lowerChannel {
-			if fVal, ok := v.(float64); ok {
-				return fVal, true
+		// Convert the formatted datetime string to time.Time
+		t, err := time.Parse("2006-01-02 15:04:05", formattedDateTime)
+		if err != nil {
+			fmt.Printf("Warning: Failed to parse formatted time '%s': %v\n", formattedDateTime, err)
+			continue
+		}
+
+		if val, ok := historicalData.HistData[i].Value[qm.Channel]; ok {
+			if floatVal, ok := val.(float64); ok {
+				times[i] = t
+				values[i] = floatVal
 			}
 		}
 	}
 
-	return 0, false
-}
-
-// ! OK createDisplayName creates a display name for the given query model
-func (d *Datasource) createDisplayName(qm queryModel) string {
-	parts := []string{}
-	if qm.ObjectId != "" {
-		parts = append(parts, fmt.Sprintf("ID: %s", qm.ObjectId))
-	}
-	if qm.IncludeGroupName && qm.Group != "" {
-		parts = append(parts, qm.Group)
-	}
-	if qm.IncludeDeviceName && qm.Device != "" {
-		parts = append(parts, qm.Device)
-	}
-	if qm.IncludeSensorName && qm.Sensor != "" {
-		parts = append(parts, qm.Sensor)
-	}
-	if qm.Channel != "" {
+	// Build display name based on user preferences
+	displayName := qm.Channel
+	if qm.IncludeGroupName || qm.IncludeDeviceName || qm.IncludeSensorName {
+		parts := []string{}
+		if qm.IncludeGroupName && qm.Group != "" {
+			parts = append(parts, qm.Group)
+		}
+		if qm.IncludeDeviceName && qm.Device != "" {
+			parts = append(parts, qm.Device)
+		}
+		if qm.IncludeSensorName && qm.Sensor != "" {
+			parts = append(parts, qm.Sensor)
+		}
 		parts = append(parts, qm.Channel)
+		displayName = strings.Join(parts, " - ")
 	}
-	return strings.Join(parts, " - ")
+
+	// Add fields to frame with proper configuration
+	frame.Fields = append(frame.Fields,
+		data.NewField("Time", nil, times),
+		data.NewField("Value", nil, values).SetConfig(&data.FieldConfig{
+			DisplayName: displayName,
+		}),
+	)
+
+	response.Frames = append(response.Frames, frame)
+	return response
 }
-
-
 
 /* ########################################## CHECK HEALTH  ############################################ */
 
@@ -440,7 +415,7 @@ func (d *Datasource) handleGetHistorical(sender backend.CallResourceResponseSend
 		})
 	}
 
-	historicalData, err := d.api.GetHistoricalData(objid, time.Now().Add(-24*time.Hour), time.Now(), "")
+	historicalData, err := d.api.GetHistoricalData(objid, time.Now().Add(-24*time.Hour), time.Now())
 	if err != nil {
 		errorResponse := map[string]string{"error": err.Error()}
 		errorJSON, _ := json.Marshal(errorResponse)
