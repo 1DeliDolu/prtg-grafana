@@ -124,11 +124,11 @@ func (d *Datasource) query(_ context.Context, _ backend.PluginContext, query bac
 	}
 
 	// Get time range values
-	from := query.TimeRange.From
-	to := query.TimeRange.To
+	From := query.TimeRange.From
+	To := query.TimeRange.To
 
 	// Get historical data with correct timestamps
-	historicalData, err := d.api.GetHistoricalData(qm.ObjectId, from, to)
+	historicalData, err := d.api.GetHistoricalData(qm.ObjectId, From, To)
 	if err != nil {
 		response.Error = err
 		return response
