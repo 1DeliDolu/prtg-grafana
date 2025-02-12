@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"os"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
 	"github.com/grafana/grafana-plugin-sdk-go/backend/instancemgmt"
@@ -75,11 +76,14 @@ func (d *Datasource) QueryData(ctx context.Context, req *backend.QueryDataReques
 
 	return response, nil
 }
-
 // parsePRTGDateTime parses PRTG datetime format "DD.MM.YYYY HH:mm:ss" and converts to "YYYY-MM-DD HH:mm:ss"
 func parsePRTGDateTime(datetime string) (string, error) {
-	// Remove any 'Z' suffix if present
-	datetime = strings.TrimSuffix(datetime, "Z")
+	// Create or open log file
+	file, err := os.OpenFile("datetime_log.txt", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return "", fmt.Errorf("failed to open log file: %v", err)
+	}
+	defer file.Close()
 
 	// Split date and time parts
 	parts := strings.Split(datetime, " ")
@@ -98,15 +102,15 @@ func parsePRTGDateTime(datetime string) (string, error) {
 
 	// Convert to YYYY-MM-DD format
 	formattedDate := fmt.Sprintf("%s-%s-%s", dateParts[2], dateParts[1], dateParts[0])
+	formattedDateTime := formattedDate + " " + timePart
 
-	// Parse time (HH:mm:ss)
-	timeParts := strings.Split(timePart, ":")
-	if len(timeParts) != 3 {
-		return "", fmt.Errorf("invalid time format: %s", timePart)
+	// Log the conversion
+	logEntry := fmt.Sprintf("Original: %s -> Converted: %s\n", datetime, formattedDateTime)
+	if _, err := file.WriteString(logEntry); err != nil {
+		fmt.Printf("Error writing to log: %v\n", err)
 	}
 
-	// Combine date and time
-	return formattedDate + " " + timePart, nil
+	return formattedDateTime, nil
 }
 
 func (d *Datasource) query(_ context.Context, _ backend.PluginContext, query backend.DataQuery) backend.DataResponse {
@@ -123,19 +127,16 @@ func (d *Datasource) query(_ context.Context, _ backend.PluginContext, query bac
 		return response
 	}
 
+	// Convert timestamps to Unix time in seconds
+	fromTime := query.TimeRange.From.Unix()
+	toTime := query.TimeRange.To.Unix()
 
-
-		// Convert timestamps to Unix time in seconds
-		fromTime := query.TimeRange.From.Unix()
-		toTime := query.TimeRange.To.Unix()
-
-		// Get historical data with the Unix timestamps
-		historicalData, err := d.api.GetHistoricalData(qm.ObjectId, fromTime, toTime)
-		if err != nil {
+	// Get historical data with the Unix timestamps
+	historicalData, err := d.api.GetHistoricalData(qm.ObjectId, fromTime, toTime)
+	if err != nil {
 		response.Error = err
 		return response
-		}
-
+	}
 
 	// Check if we have any data
 	if len(historicalData.HistData) == 0 {
@@ -149,6 +150,13 @@ func (d *Datasource) query(_ context.Context, _ backend.PluginContext, query bac
 	// Extract the requested parameter values based on datetime and value
 	times := make([]time.Time, len(historicalData.HistData))
 	values := make([]float64, len(historicalData.HistData))
+
+	// Open file for logging first 5 time values
+	file, err := os.OpenFile("time_values.txt", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err == nil {
+		defer file.Close()
+		file.WriteString("\n--- New Query Results ---\n")
+	}
 
 	// Process data points
 	for i := range historicalData.HistData {
@@ -164,6 +172,11 @@ func (d *Datasource) query(_ context.Context, _ backend.PluginContext, query bac
 		if err != nil {
 			fmt.Printf("Warning: Failed to parse formatted time '%s': %v\n", formattedDateTime, err)
 			continue
+		}
+
+		// Log first 5 time values to file
+		if i < 5 && file != nil {
+			fmt.Fprintf(file, "Time %d: %s\n", i+1, t.Format("2006-01-02 15:04:05"))
 		}
 
 		if val, ok := historicalData.HistData[i].Value[qm.Channel]; ok {
