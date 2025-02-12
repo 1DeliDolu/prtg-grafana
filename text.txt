@@ -1,0 +1,1 @@
+cd /mnt/d/Praxis/PRTG_GRAFANA/maxmarkusprogram-prtg-datasource
