@@ -9,6 +9,9 @@ import (
 	"net/url"
 	"os"
 	"time"
+
+	"github.com/grafana/grafana-plugin-sdk-go/backend"
+	"github.com/grafana/grafana-plugin-sdk-go/backend/log"
 )
 
 // Api struct to hold API related configurations
@@ -85,6 +88,7 @@ func (a *Api) baseExecuteRequest(endpoint string, params map[string]string) ([]b
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusForbidden {
+		log.DefaultLogger.Error("Access denied: please verify API token and permissions")
 		return nil, fmt.Errorf("access denied: please verify API token and permissions")
 	}
 	if resp.StatusCode != http.StatusOK {
@@ -206,43 +210,46 @@ func (a *Api) GetChannels(objid string) (*PrtgChannelValueStruct, error) {
 
 // GetHistoricalData retrieves historical data for the given sensor ID and time range
 func (a *Api) GetHistoricalData(sensorID string, startDate, endDate int64) (*PrtgHistoricalDataResponse, error) {
+	// Log request details
+	backend.Logger.Info("GetHistoricalData called", "sensorID", sensorID, "startDate", startDate, "endDate", endDate)
+
 	if sensorID == "" {
 		return nil, fmt.Errorf("invalid query: missing sensor ID")
-	// Validate time range
 	}
-	
-	if startDate >= endDate {
-		return nil, fmt.Errorf("invalid time range: start date must be before end date")
-	}
-
 	// Convert Unix timestamps to time.Time
-	startUTC := time.Unix(startDate, 0)
-	endUTC := time.Unix(endDate, 0)
+	startTime := time.UnixMilli(startDate)
+	endTime := time.UnixMilli(endDate)
 
-	// Format dates in PRTG format (YYYY-MM-DD-HH-mm-ss)
-	format := "2006-01-02-15-04-05"
-	sdate := startUTC.Format(format)
-	edate := endUTC.Format(format)
+	// PRTG API requires timestamps in this format
+	const format = "2006-01-02-15-04-05"
+	sdate := startTime.Format(format)
+	edate := endTime.Format(format)
 
-	// Calculate hours difference for determining averaging interval
-	hours := endUTC.Sub(startUTC).Hours()
+	// Check time difference
+	hours := endTime.Sub(startTime).Hours()
+	if hours <= 0 {
+		backend.Logger.Error("Invalid time range", "startDate", sdate, "endDate", edate)
+		return nil, fmt.Errorf("invalid time range: start date %v must be before end date %v", startTime, endTime)
+	}
+
+	// Check time range validity
+	if startDate >= endDate {
+		return nil, fmt.Errorf("invalid time range: start date %d must be before end date %d. sdate: %s edate: %s start: %v end: %v", 
+			startDate, endDate, sdate, edate, startTime, endTime)
+	}
 
 	// Determine averaging interval
 	var avg string
 	switch {
-	case hours > 12 && hours < 36:
-		avg = "300"
-	case hours > 36 && hours < 745:
-		avg = "3600"
 	case hours > 745:
 		avg = "86400"
+	case hours > 36:
+		avg = "3600"
+	case hours > 12:
+		avg = "300"
 	default:
 		avg = "0"
 	}
-
-	// Debug timestamps
-	fmt.Printf("Start date: %v (%s)\n", startUTC, sdate)
-	fmt.Printf("End date: %v (%s)\n", endUTC, edate)
 
 	// Build parameters
 	params := map[string]string{
@@ -264,10 +271,19 @@ func (a *Api) GetHistoricalData(sensorID string, startDate, endDate int64) (*Prt
 	if err := json.Unmarshal(body, &response); err != nil {
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
-	// check time and print first datetime if available
+
+	backend.Logger.Info("Historical data response received successfully")
+
+	// Save raw response to file for debugging
+	if err := os.WriteFile("historical_data_response.txt", body, 0644); err != nil {
+		backend.Logger.Warn("Could not save response to file", "error", err)
+	}
+
+	// Check response data
 	if len(response.HistData) == 0 {
 		return nil, fmt.Errorf("no data found for the given time range")
 	}
-	fmt.Printf("First datetime in response: %s\n", response.HistData[0].Datetime)
+	backend.Logger.Info("First datetime in response", "datetime", response.HistData[0].Datetime)
+
 	return &response, nil
 }

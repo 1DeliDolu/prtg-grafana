@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
-	"os"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
 	"github.com/grafana/grafana-plugin-sdk-go/backend/instancemgmt"
@@ -33,7 +33,6 @@ func NewDatasource(_ context.Context, settings backend.DataSourceInstanceSetting
 	if err != nil {
 		return nil, err
 	}
-
 	baseURL := fmt.Sprintf("https://%s", config.Path)
 
 	fmt.Println("baseURL: ", baseURL)
@@ -76,135 +75,137 @@ func (d *Datasource) QueryData(ctx context.Context, req *backend.QueryDataReques
 
 	return response, nil
 }
-// parsePRTGDateTime parses PRTG datetime format "DD.MM.YYYY HH:mm:ss" and converts to "YYYY-MM-DD HH:mm:ss"
-func parsePRTGDateTime(datetime string) (string, error) {
-	// Create or open log file
-	file, err := os.OpenFile("datetime_log.txt", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+
+// parsePRTGDateTime parses PRTG datetime format "DD.MM.YYYY HH:mm:ss" and returns time.Time
+func parsePRTGDateTime(datetime string) (time.Time, string, error) {
+	// PRTG Tarih formatı: "DD.MM.YYYY HH:mm:ss"
+	layout := "02.01.2006 15:04:05"
+
+	// Parse datetime string using the correct format
+	parsedTime, err := time.Parse(layout, datetime)
 	if err != nil {
-		return "", fmt.Errorf("failed to open log file: %v", err)
-	}
-	defer file.Close()
-
-	// Split date and time parts
-	parts := strings.Split(datetime, " ")
-	if len(parts) != 2 {
-		return "", fmt.Errorf("invalid datetime format: %s", datetime)
+		backend.Logger.Warn("Date parsing failed", "datetime", datetime, "error", err)
+		return time.Time{}, "", fmt.Errorf("failed to parse time: %w", err)
 	}
 
-	datePart := parts[0]
-	timePart := parts[1]
+	// Convert to Unix timestamp
+	unixTime := parsedTime.Unix()
+	formattedTime := strconv.FormatInt(unixTime, 10)
 
-	// Parse date (DD.MM.YYYY)
-	dateParts := strings.Split(datePart, ".")
-	if len(dateParts) != 3 {
-		return "", fmt.Errorf("invalid date format: %s", datePart)
-	}
+	
 
-	// Convert to YYYY-MM-DD format
-	formattedDate := fmt.Sprintf("%s-%s-%s", dateParts[2], dateParts[1], dateParts[0])
-	formattedDateTime := formattedDate + " " + timePart
+	// Log çıktısı
+	backend.Logger.Info("Time conversion", 
+		"original", datetime,
+		"unix", unixTime)
 
-	// Log the conversion
-	logEntry := fmt.Sprintf("Original: %s -> Converted: %s\n", datetime, formattedDateTime)
-	if _, err := file.WriteString(logEntry); err != nil {
-		fmt.Printf("Error writing to log: %v\n", err)
-	}
-
-	return formattedDateTime, nil
+	return parsedTime, formattedTime, nil
 }
 
 func (d *Datasource) query(_ context.Context, _ backend.PluginContext, query backend.DataQuery) backend.DataResponse {
 	var response backend.DataResponse
 	var qm queryModel
 
-	err := json.Unmarshal(query.JSON, &qm)
-	if err != nil {
-		return backend.ErrDataResponse(backend.StatusBadRequest, fmt.Sprintf("json unmarshal: %v", err.Error()))
+	backend.Logger.Debug("Raw query parameters",
+		"timeRange", fmt.Sprintf("%v to %v", query.TimeRange.From, query.TimeRange.To),
+		"rawJSON", string(query.JSON))
+
+	if err := json.Unmarshal(query.JSON, &qm); err != nil {
+		return backend.ErrDataResponse(backend.StatusBadRequest, fmt.Sprintf("json unmarshal error: %v", err))
 	}
 
-	// Check required parameters
-	if qm.ObjectId == "" || qm.Channel == "" {
-		return response
-	}
+	fromTime := query.TimeRange.From.UnixMilli()
+	toTime := query.TimeRange.To.UnixMilli()
 
-	// Convert timestamps to Unix time in seconds
-	fromTime := query.TimeRange.From.Unix()
-	toTime := query.TimeRange.To.Unix()
+	backend.Logger.Info("Fetching historical data",
+		"objectId", qm.ObjectId,
+		"channel", qm.Channel,
+		"from", fromTime,
+		"to", toTime)
 
-	// Get historical data with the Unix timestamps
 	historicalData, err := d.api.GetHistoricalData(qm.ObjectId, fromTime, toTime)
 	if err != nil {
-		response.Error = err
-		return response
+		backend.Logger.Error("API request failed", "error", err)
+		return backend.ErrDataResponse(backend.StatusBadRequest, fmt.Sprintf("API request failed: %v", err))
 	}
 
-	// Check if we have any data
-	if len(historicalData.HistData) == 0 {
-		response.Error = fmt.Errorf("no data found for sensor")
-		return response
-	}
+	backend.Logger.Info("Received historical data", "dataPoints", len(historicalData.HistData))
 
-	// Create frame
-	frame := data.NewFrame("response")
-
-	// Extract the requested parameter values based on datetime and value
+	// Burada slice'ları sabit uzunlukta başlatıyoruz!
 	times := make([]time.Time, len(historicalData.HistData))
 	values := make([]float64, len(historicalData.HistData))
 
-	// Open file for logging first 5 time values
-	file, err := os.OpenFile("time_values.txt", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err == nil {
-		defer file.Close()
-		file.WriteString("\n--- New Query Results ---\n")
-	}
-
-	// Process data points
-	for i := range historicalData.HistData {
-		// Parse date in PRTG format using our custom parser
-		formattedDateTime, err := parsePRTGDateTime(historicalData.HistData[i].Datetime)
+	for i, item := range historicalData.HistData {
+		formattedDateTime, _, err := parsePRTGDateTime(item.Datetime)
 		if err != nil {
-			fmt.Printf("Warning: Failed to parse time '%s': %v\n", historicalData.HistData[i].Datetime, err)
+			backend.Logger.Warn("Date parsing failed", "datetime", item.Datetime, "error", err)
 			continue
 		}
 
-		// Convert the formatted datetime string to time.Time
-		t, err := time.Parse("2006-01-02 15:04:05", formattedDateTime)
-		if err != nil {
-			fmt.Printf("Warning: Failed to parse formatted time '%s': %v\n", formattedDateTime, err)
-			continue
-		}
+		backend.Logger.Info("Formatted Time", "formattedDateTime", formattedDateTime)
+		backend.Logger.Info("Channel", "channel", qm.Channel)
 
-		// Log first 5 time values to file
-		if i < 5 && file != nil {
-			fmt.Fprintf(file, "Time %d: %s\n", i+1, t.Format("2006-01-02 15:04:05"))
-		}
+		backend.Logger.Info("Item Value", "item.Value", item.Value, "qm.Channel", qm.Channel, "item.Value[qm.Channel]", item.Value[qm.Channel])
 
-		if val, ok := historicalData.HistData[i].Value[qm.Channel]; ok {
-			if floatVal, ok := val.(float64); ok {
-				times[i] = t
-				values[i] = floatVal
+		if val, ok := item.Value[qm.Channel]; ok {
+			switch v := val.(type) {
+			case float64:
+				values[i] = v
+				backend.Logger.Info("Value float64", "value", v)
+			case string:
+				if floatVal, err := strconv.ParseFloat(v, 64); err == nil {
+					values[i] = floatVal
+				} else {
+					backend.Logger.Warn("Cannot convert value to float64", "value", v, "error", err)
+					continue
+				}
+			default:
+				backend.Logger.Warn("Unexpected value type", "type", fmt.Sprintf("%T", v), "value", v)
+				continue
 			}
+			times[i] = formattedDateTime  // ❗ Artık index hatası vermeyecek
+		} else {
+			// Eğer JSON'da değer yoksa, varsayılan değeri 0.0 olarak ayarla
+			backend.Logger.Warn("Channel not found in item.Value, setting default value", "channel", qm.Channel)
+			times[i] = formattedDateTime  // ❗ Eğer veri yoksa bile tarih atanmalı
+			values[i] = 0.0               // ❗ Varsayılan değer olarak 0 atanmalı
 		}
 	}
+	backend.Logger.Info("Fetching historical data",
+		"objectId", qm.ObjectId,
+		"channel", qm.Channel,
+		"from", fromTime,
+		"to", toTime)
 
-	// Build display name based on user preferences
-	displayName := qm.Channel
-	if qm.IncludeGroupName || qm.IncludeDeviceName || qm.IncludeSensorName {
-		parts := []string{}
-		if qm.IncludeGroupName && qm.Group != "" {
-			parts = append(parts, qm.Group)
-		}
-		if qm.IncludeDeviceName && qm.Device != "" {
-			parts = append(parts, qm.Device)
-		}
-		if qm.IncludeSensorName && qm.Sensor != "" {
-			parts = append(parts, qm.Sensor)
-		}
-		parts = append(parts, qm.Channel)
-		displayName = strings.Join(parts, " - ")
+
+	backend.Logger.Info("Processed data points", "totalCount", len(historicalData.HistData))
+
+	if len(times) > 0 && len(values) > 0 {
+		backend.Logger.Info("Processed data points",
+			"totalCount", len(historicalData.HistData),
+			"firstTimestamp", times[0],
+			"firstValue", values[0])
+	} else {
+		backend.Logger.Warn("No valid data points were processed")
 	}
 
-	// Add fields to frame with proper configuration
+	var displayName string
+	parts := []string{}
+
+	if qm.IncludeGroupName && qm.Group != "" {
+		parts = append(parts, qm.Group)
+	}
+	if qm.IncludeDeviceName && qm.Device != "" {
+		parts = append(parts, qm.Device)
+	}
+	if qm.IncludeSensorName && qm.Sensor != "" {
+		parts = append(parts, qm.Sensor)
+	}
+	parts = append(parts, qm.Channel)
+	displayName = strings.Join(parts, " - ")
+
+	frame := data.NewFrame("response")
+
 	frame.Fields = append(frame.Fields,
 		data.NewField("Time", nil, times),
 		data.NewField("Value", nil, values).SetConfig(&data.FieldConfig{
@@ -215,6 +216,7 @@ func (d *Datasource) query(_ context.Context, _ backend.PluginContext, query bac
 	response.Frames = append(response.Frames, frame)
 	return response
 }
+
 
 /* ########################################## CHECK HEALTH  ############################################ */
 
@@ -403,5 +405,3 @@ func (d *Datasource) handleGetChannel(sender backend.CallResourceResponseSender,
 		Body: body,
 	})
 }
-
-

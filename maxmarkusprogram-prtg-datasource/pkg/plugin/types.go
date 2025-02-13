@@ -1,5 +1,8 @@
 package plugin
 
+import (
+	"encoding/json"
+)
 
 // PrtgTableListResponse represents the PRTG Table List API response
 type PrtgTableListResponse struct {
@@ -56,7 +59,7 @@ type PrtgGroupListItemStruct struct {
 	WarnsensRAW    int     `json:"warnsens_raw" xml:"warnsens_raw"`
 }
 
-//############################# DEVICE LIST RESPONSE ####################################
+// ############################# DEVICE LIST RESPONSE ####################################
 type PrtgDevicesListResponse struct {
 	PrtgVersion string                     `json:"prtg-version" xml:"prtg-version"`
 	TreeSize    int64                      `json:"treesize" xml:"treesize"`
@@ -183,7 +186,7 @@ type PrtgStatusListResponse struct {
 	WarnSens             string `json:"warnsens"`
 }
 
-//############################# CHANNEL LIST RESPONSE ####################################
+// ############################# CHANNEL LIST RESPONSE ####################################
 type PrtgChannelsListResponse struct {
 	PrtgVersion string                   `json:"prtg-version" xml:"prtg-version"`
 	TreeSize    int64                    `json:"treesize" xml:"treesize"`
@@ -201,8 +204,27 @@ type PrtgHistoricalDataResponse struct {
 }
 
 type PrtgValues struct {
-	Datetime string                 `json:"datetime" xml:"datetime"`
-	Value    map[string]interface{} `json:"value" xml:"value"`
+	Datetime string                 `json:"datetime"`
+	Value    map[string]interface{} `json:"-"`
+}
+
+// JSON'u dinamik olarak parse eden özel Unmarshal fonksiyonu
+func (p *PrtgValues) UnmarshalJSON(data []byte) error {
+	// Önce JSON verisini genel bir map olarak parse edelim
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	// "datetime" alanını ayrı olarak kaydedelim
+	if dt, ok := raw["datetime"].(string); ok {
+		p.Datetime = dt
+	}
+	// datetime'ı map'ten çıkar, kalan her şeyi `Value` içine koy
+	delete(raw, "datetime")
+
+	p.Value = raw
+	return nil
 }
 
 /* ##################################### QUERY MODEL #################################### */
@@ -240,9 +262,11 @@ type queryModel struct {
 	IncludeGroupName  bool   `json:"includeGroupName"`
 	IncludeDeviceName bool   `json:"includeDeviceName"`
 	IncludeSensorName bool   `json:"includeSensorName"`
-	Groups            []string 
+	Groups            []string
 	Devices           []string
 	Sensors           []string
-	From			  int64  `json:"from"`	
-	To				  int64  `json:"to"`
+	From              int64  `json:"from"`
+	To                int64  `json:"to"`
 }
+
+type MyDatasource struct{}

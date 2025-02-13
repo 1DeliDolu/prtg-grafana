@@ -7,6 +7,7 @@ export class DataSource extends DataSourceWithBackend<MyQuery, MyDataSourceOptio
     super(instanceSettings);
   }
 
+  
   applyTemplateVariables(query: MyQuery, scopedVars: ScopedVars) {
     return {
       ...query,
@@ -33,7 +34,7 @@ export class DataSource extends DataSourceWithBackend<MyQuery, MyDataSourceOptio
 
   async getChannels(objid: string): Promise<PRTGChannelListResponse> {
     if (!objid) {
-        throw new Error('objid is required');
+      throw new Error('objid is required');
     }
     return this.getResource(`channels/${objid}`);
   }
