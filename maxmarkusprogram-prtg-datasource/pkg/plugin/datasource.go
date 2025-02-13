@@ -123,6 +123,9 @@ func (d *Datasource) query(_ context.Context, _ backend.PluginContext, query bac
 		"from", fromTime,
 		"to", toTime)
 
+	
+	if qm.QueryType == "metrics" {
+	
 	historicalData, err := d.api.GetHistoricalData(qm.ObjectId, fromTime, toTime)
 	if err != nil {
 		backend.Logger.Error("API request failed", "error", err)
@@ -215,7 +218,25 @@ func (d *Datasource) query(_ context.Context, _ backend.PluginContext, query bac
 
 	response.Frames = append(response.Frames, frame)
 	return response
+	} else if qm.QueryType == "text" {
+	textData, err := d.api.GetTextData(qm.ObjectId, fromTime, toTime)
+	if err != nil {
+		backend.Logger.Error("API request failed", "error", err)
+		return backend.ErrDataResponse(backend.StatusBadRequest, fmt.Sprintf("API request failed: %v", err))
+	}
+
+	return d.handlePropertyQuery(qm, qm.Property)
+	}else if qm.QueryType == "raw" {
+
+	rawData, err := d.api.GetPropertyData(qm.ObjectId, fromTime, toTime)
+	if err != nil {
+		backend.Logger.Error("API request failed", "error", err)
+		return backend.ErrDataResponse(backend.StatusBadRequest, fmt.Sprintf("API request failed: %v", err))
+	}
+
+	return d.handlePropertyQuery(qm, qm.Property)
 }
+
 
 
 /* ########################################## CHECK HEALTH  ############################################ */
@@ -225,8 +246,8 @@ func (d *Datasource) query(_ context.Context, _ backend.PluginContext, query bac
 // datasource configuration page which allows users to verify that
 // a datasource is working as expected.
 func (d *Datasource) CheckHealth(_ context.Context, req *backend.CheckHealthRequest) (*backend.CheckHealthResult, error) {
+	config, err := models.LoadPluginSettings(req.PluginContext.DataSourceInstanceSettings)
 	res := &backend.CheckHealthResult{}
-	config, err := models.LoadPluginSettings(*req.PluginContext.DataSourceInstanceSettings)
 
 	if err != nil {
 		res.Status = backend.HealthStatusError
