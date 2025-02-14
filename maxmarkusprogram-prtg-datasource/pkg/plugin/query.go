@@ -9,166 +9,343 @@ import (
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
 	"github.com/grafana/grafana-plugin-sdk-go/data"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
-
-// PRTGDatasource repräsentiert das PRTG Datasource Plugin.
-type PRTGDatasource struct {
-	api PRTGAPI
-}
 
 // PRTGAPI definiert die Schnittstelle für API-Operationen.
 type PRTGAPI interface {
 	GetGroups() (*PrtgGroupListResponse, error)
 	GetDevices() (*PrtgDevicesListResponse, error)
 	GetSensors() (*PrtgSensorsListResponse, error)
-	// Zusätzliche Methoden wie GetTextData, GetPropertyData etc. sollten hier deklariert werden.
+	// Zusätzliche Methoden wie GetTextData, GetPropertyData etc. können hier deklariert werden.
 }
 
-func (d *PRTGDatasource) handlePropertyQuery(qm queryModel, filterProperty string) backend.DataResponse {
+// handlePropertyQuery verarbeitet eine Eigenschaftsanfrage anhand des queryModel (qm)
+// und eines Filter-Properties.
+func (d *Datasource) handlePropertyQuery(qm queryModel, filterProperty string) backend.DataResponse {
 	var response backend.DataResponse
-	if !isValidPropertyType(qm.Property) {
-		return backend.ErrDataResponse(backend.StatusBadRequest, "Ungültiger Eigenschaftstyp")
+	var times []time.Time
+	var values []interface{}
+
+	if !d.isValidPropertyType(qm.Property) {
+		return backend.ErrDataResponse(backend.StatusBadRequest, "Invalid property type")
 	}
-	if filterProperty == "" {
-		filterProperty = "status"
-	}
-	frame := data.NewFrame("response")
-	var fields []*data.Field
 
 	switch qm.Property {
 	case "group":
 		groups, err := d.api.GetGroups()
 		if err != nil {
-			return backend.ErrDataResponse(backend.StatusBadRequest, fmt.Sprintf("API Anfrage fehlgeschlagen: %v", err))
+			return backend.ErrDataResponse(backend.StatusBadRequest, fmt.Sprintf("API request failed: %v", err))
 		}
-		var groupInfo *PrtgGroupListItemStruct
 		for _, g := range groups.Groups {
 			if g.Group == qm.Group {
-				groupInfo = &g
-				break
+				timestamp, _, err := parsePRTGDateTime(g.Datetime)
+				if err != nil {
+					backend.Logger.Warn("Date parsing failed", "datetime", g.Datetime, "error", err)
+					continue
+				}
+
+				// Get the property value based on filterProperty
+				var value interface{}
+				switch filterProperty {
+				case "active":
+					value = g.Active
+				case "active_raw":
+					value = g.ActiveRAW
+				case "message":
+					value = cleanMessageHTML(g.Message)
+				case "message_raw":
+					value = g.MessageRAW
+				case "priority":
+					value = g.Priority
+				case "priority_raw":
+					value = g.PriorityRAW
+				case "status":
+					value = g.Status
+				case "status_raw":
+					value = g.StatusRAW
+				case "tags":
+					value = g.Tags
+				case "tags_raw":
+					value = g.TagsRAW
+				}
+
+				if value != nil {
+					times = append(times, timestamp)
+					values = append(values, value)
+					backend.Logger.Debug("Adding value", "timestamp", timestamp, "value", value)
+				}
 			}
 		}
-		if groupInfo == nil {
-			return backend.ErrDataResponse(backend.StatusBadRequest, "Gruppe nicht gefunden")
-		}
-		timestamp, _, err := parsePRTGDateTime(groupInfo.Datetime)
-		if err != nil {
-			return backend.ErrDataResponse(backend.StatusBadRequest, fmt.Sprintf("Datum parsen fehlgeschlagen: %v", err))
-		}
-		value := d.getPropertyValue(filterProperty, groupInfo)
-		fields = d.createFields(timestamp, filterProperty, value, groupInfo.Group, "", "")
 
 	case "device":
+		// Similar structure for devices
 		devices, err := d.api.GetDevices()
 		if err != nil {
-			return backend.ErrDataResponse(backend.StatusBadRequest, fmt.Sprintf("API Anfrage fehlgeschlagen: %v", err))
+			return backend.ErrDataResponse(backend.StatusBadRequest, fmt.Sprintf("API request failed: %v", err))
 		}
-		var deviceInfo *PrtgDeviceListItemStruct
-		for _, d := range devices.Devices {
-			if d.Device == qm.Device {
-				deviceInfo = &d
-				break
+		for _, dev := range devices.Devices {
+			if dev.Device == qm.Device {
+				timestamp, _, err := parsePRTGDateTime(dev.Datetime)
+				if err != nil {
+					continue
+				}
+
+				var value interface{}
+				switch filterProperty {
+				case "active":
+					value = dev.Active
+				case "active_raw":
+					value = dev.ActiveRAW
+				case "message":
+					value = cleanMessageHTML(dev.Message)
+				case "message_raw":
+					value = dev.MessageRAW
+				case "priority":
+					value = dev.Priority
+				case "priority_raw":
+					value = dev.PriorityRAW
+				case "status":
+					value = dev.Status
+				case "status_raw":
+					value = dev.StatusRAW
+				case "tags":
+					value = dev.Tags
+				case "tags_raw":
+					value = dev.TagsRAW
+				}
+
+				if value != nil {
+					times = append(times, timestamp)
+					values = append(values, value)
+					backend.Logger.Debug("Adding value", "timestamp", timestamp, "value", value)
+				}
 			}
 		}
-		if deviceInfo == nil {
-			return backend.ErrDataResponse(backend.StatusBadRequest, "Gerät nicht gefunden")
-		}
-		timestamp, _, err := parsePRTGDateTime(deviceInfo.Datetime)
-		if err != nil {
-			return backend.ErrDataResponse(backend.StatusBadRequest, fmt.Sprintf("Datum parsen fehlgeschlagen: %v", err))
-		}
-		value := d.getPropertyValue(filterProperty, deviceInfo)
-		fields = d.createFields(timestamp, filterProperty, value, deviceInfo.Group, deviceInfo.Device, "")
 
 	case "sensor":
 		sensors, err := d.api.GetSensors()
 		if err != nil {
-			return backend.ErrDataResponse(backend.StatusBadRequest, fmt.Sprintf("API Anfrage fehlgeschlagen: %v", err))
+			return backend.ErrDataResponse(backend.StatusBadRequest, fmt.Sprintf("API request failed: %v", err))
 		}
-		var sensorInfo *PrtgSensorListItemStruct
+
+		backend.Logger.Debug("Processing sensors response",
+			"sensorCount", len(sensors.Sensors),
+			"lookingFor", qm.Sensor,
+			"filterProperty", filterProperty)
+
 		for _, s := range sensors.Sensors {
 			if s.Sensor == qm.Sensor {
-				sensorInfo = &s
-				break
+				timestamp, _, err := parsePRTGDateTime(s.Datetime)
+				if err != nil {
+					backend.Logger.Error("Failed to parse sensor datetime",
+						"sensor", s.Sensor,
+						"datetime", s.Datetime,
+						"error", err)
+					continue
+				}
+
+				// Get the value based on filterProperty
+				var value interface{}
+				switch filterProperty {
+				case "status", "status_raw":
+					if filterProperty == "status_raw" {
+						value = float64(s.StatusRAW) // Convert to float64 for consistent graphing
+					} else {
+						value = s.Status
+					}
+				case "active", "active_raw":
+					if filterProperty == "active_raw" {
+						value = float64(s.ActiveRAW)
+					} else {
+						value = s.Active
+					}
+				case "priority", "priority_raw":
+					if filterProperty == "priority_raw" {
+						value = float64(s.PriorityRAW)
+					} else {
+						value = s.Priority
+					}
+				case "message", "message_raw":
+					if filterProperty == "message_raw" {
+						value = s.MessageRAW
+					} else {
+						value = cleanMessageHTML(s.Message)
+					}
+				case "tags", "tags_raw":
+					if filterProperty == "tags_raw" {
+						value = s.TagsRAW
+					} else {
+						value = s.Tags
+					}
+				}
+
+				if value != nil {
+					times = append(times, timestamp)
+					values = append(values, value)
+					backend.Logger.Debug("Adding data point",
+						"timestamp", timestamp,
+						"value", value,
+						"filterProperty", filterProperty,
+						"sensor", qm.Sensor)
+				}
 			}
 		}
-		if sensorInfo == nil {
-			return backend.ErrDataResponse(backend.StatusBadRequest, "Sensor nicht gefunden")
-		}
-		timestamp, _, err := parsePRTGDateTime(sensorInfo.Datetime)
-		if err != nil {
-			return backend.ErrDataResponse(backend.StatusBadRequest, fmt.Sprintf("Datum parsen fehlgeschlagen: %v", err))
-		}
-		value := d.getPropertyValue(filterProperty, sensorInfo)
-		fields = d.createFields(timestamp, filterProperty, value, sensorInfo.Group, sensorInfo.Device, sensorInfo.Sensor)
 
-	default:
-		backend.Logger.Warn("Unbekannter Eigenschaftstyp", "type", qm.Property)
-		return backend.ErrDataResponse(backend.StatusBadRequest, "Unbekannter Eigenschaftstyp")
 	}
 
-	frame.Fields = fields
-	response.Frames = append(response.Frames, frame)
+	// Create frame with proper field configuration
+	if len(times) > 0 && len(values) > 0 {
+		timeField := data.NewField("Time", nil, times)
+
+		// Determine the type of values and create appropriate field
+		var valueField *data.Field
+		if len(values) > 0 {
+			switch values[0].(type) {
+			case float64, int:
+				// Convert all values to float64
+				floatVals := make([]float64, len(values))
+				for i, v := range values {
+					switch tv := v.(type) {
+					case float64:
+						floatVals[i] = tv
+					case int:
+						floatVals[i] = float64(tv)
+					}
+				}
+				valueField = data.NewField("Value", nil, floatVals)
+			case string:
+				// Keep string values as they are
+				strVals := make([]string, len(values))
+				for i, v := range values {
+					strVals[i] = v.(string)
+				}
+				valueField = data.NewField("Value", nil, strVals)
+			default:
+				// Convert other types to strings
+				strVals := make([]string, len(values))
+				for i, v := range values {
+					strVals[i] = fmt.Sprintf("%v", v)
+				}
+				valueField = data.NewField("Value", nil, strVals)
+			}
+		}
+
+		// Set display name
+		displayName := fmt.Sprintf("%s - %s (%s)", qm.Property, qm.Sensor, filterProperty)
+		valueField.Config = &data.FieldConfig{
+			DisplayName: displayName,
+		}
+
+		frame := data.NewFrame("response",
+			timeField,
+			valueField,
+		)
+
+		response.Frames = append(response.Frames, frame)
+		backend.Logger.Debug("Created frame",
+			"frameLength", len(response.Frames),
+			"timePoints", len(times),
+			"valuePoints", len(values))
+	}
+
 	return response
 }
 
-func isValidPropertyType(propertyType string) bool {
-	validTypes := map[string]bool{
-		"group":  true,
-		"device": true,
-		"sensor": true,
-	}
-	return validTypes[propertyType]
-}
-
-func (d *PRTGDatasource) getPropertyValue(property string, item interface{}) string {
+// Move GetPropertyValue to be a method of Datasource
+func (d *Datasource) GetPropertyValue(property string, item interface{}) string {
 	v := reflect.ValueOf(item)
 	if v.Kind() == reflect.Ptr {
 		v = v.Elem()
 	}
-	switch property {
-	case "status":
-		if field := v.FieldByName("Status"); field.IsValid() {
-			return field.String()
+
+	// Handle raw property requests
+	isRawRequest := strings.HasSuffix(property, "_raw")
+	baseProperty := strings.TrimSuffix(property, "_raw")
+	fieldName := cases.Title(language.English).String(baseProperty)
+	// First letter to uppercase for matching struct field names
+
+	// Add proper suffix based on request type
+	if isRawRequest {
+		fieldName += "_raw" // Use lowercase suffix as in JSON
+	}
+
+	// Get the field using the exact field name from JSON
+	field := v.FieldByName(fieldName)
+	if !field.IsValid() {
+		// Try alternative field names if the first attempt fails
+		alternatives := []string{
+			baseProperty,               // try lowercase
+			baseProperty + "_raw",      // try lowercase with raw
+			strings.ToLower(fieldName), // try all lowercase
+			strings.ToUpper(fieldName), // try all uppercase
+			baseProperty + "_RAW",      // try uppercase RAW
 		}
-	case "message":
-		if field := v.FieldByName("Message"); field.IsValid() {
-			return field.String()
-		}
-	case "active":
-		if field := v.FieldByName("Active"); field.IsValid() {
-			return strconv.FormatBool(field.Bool())
-		}
-	case "priority":
-		if field := v.FieldByName("PriorityRAW"); field.IsValid() {
-			return strconv.FormatInt(field.Int(), 10)
-		}
-	case "tags":
-		if field := v.FieldByName("Tags"); field.IsValid() {
-			return field.String()
+
+		for _, alt := range alternatives {
+			if f := v.FieldByName(alt); f.IsValid() {
+				field = f
+				break
+			}
 		}
 	}
-	return "Unknown"
+
+	if !field.IsValid() {
+		return "Unknown"
+	}
+
+	// Convert the value to string based on the field's type
+	val := field.Interface()
+	switch v := val.(type) {
+	case int:
+		return strconv.Itoa(v)
+	case float64:
+		return strconv.FormatFloat(v, 'f', -1, 64)
+	case bool:
+		if isRawRequest {
+			if v {
+				return "1"
+			}
+			return "0"
+		}
+		return strconv.FormatBool(v)
+	case string:
+		if !isRawRequest && baseProperty == "message" {
+			return cleanMessageHTML(v)
+		}
+		return v
+	default:
+		return fmt.Sprintf("%v", v)
+	}
 }
 
-func (d *PRTGDatasource) createFields(timestamp time.Time, filterProperty, value, group, device, sensor string) []*data.Field {
-	var nameParts []string
-	if group != "" {
-		nameParts = append(nameParts, group)
-	}
-	if device != "" {
-		nameParts = append(nameParts, device)
-	}
-	if sensor != "" {
-		nameParts = append(nameParts, sensor)
-	}
-	nameParts = append(nameParts, filterProperty)
-	displayName := strings.Join(nameParts, " - ")
+// Helper function to clean HTML from message
+func cleanMessageHTML(message string) string {
+	message = strings.ReplaceAll(message, `<div class="status">`, "")
+	message = strings.ReplaceAll(message, `<div class="moreicon">`, "")
+	message = strings.ReplaceAll(message, "</div>", "")
+	return strings.TrimSpace(message)
+}
 
-	return []*data.Field{
-		data.NewField("Time", nil, []time.Time{timestamp}),
-		data.NewField(filterProperty, nil, []string{value}).SetConfig(&data.FieldConfig{
-			DisplayName: displayName,
-		}),
+// isValidPropertyType checks if the given property type and name are valid
+func (d *Datasource) isValidPropertyType(propertyType string) bool {
+	validProperties := []string{
+		"group", "device", "sensor", // object types
+		"status", "status_raw",
+		"message", "message_raw",
+		"active", "active_raw",
+		"priority", "priority_raw",
+		"tags", "tags_raw",
 	}
+
+	propertyType = strings.ToLower(propertyType)
+	for _, valid := range validProperties {
+		if propertyType == valid {
+			return true
+		}
+	}
+	return false
+
+	// 14.02.2025 13:49:00
 }

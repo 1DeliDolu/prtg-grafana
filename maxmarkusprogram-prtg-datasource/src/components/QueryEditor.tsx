@@ -30,6 +30,7 @@ export function QueryEditor({ query, onChange, onRunQuery, datasource }: Props) 
   })
 
   const [isLoading, setIsLoading] = useState(false)
+
   /* ############################################## FETCH GROUPS ####################################### */
   useEffect(() => {
     async function fetchGroups() {
@@ -113,8 +114,8 @@ export function QueryEditor({ query, onChange, onRunQuery, datasource }: Props) 
     fetchSensors()
   }, [datasource, device])
 
-  /* ######################################## FETCH CHANNEL ############################################### */
-  
+  /* ####################################### FETCH CHANNEL ############################################# */
+
   useEffect(() => {
     async function fetchChannels() {
       if (!objid) {
@@ -135,19 +136,16 @@ export function QueryEditor({ query, onChange, onRunQuery, datasource }: Props) 
           return
         }
 
-        // Check if response is JSON object
         if (typeof response !== 'object') {
           console.error('Invalid response format:', response)
           return
         }
 
-        // Check for error in response
         if ('error' in response) {
           console.error('API Error:', response.error)
           return
         }
 
-        // Check for channels array
         if (!Array.isArray(response.values)) {
           console.error('Invalid channels format:', response)
           return
@@ -180,27 +178,7 @@ export function QueryEditor({ query, onChange, onRunQuery, datasource }: Props) 
   }, [datasource, objid])
 
   useEffect(() => {
-    if (isRawMode) {
-      const propertyOptions: Array<SelectableValue<string>> = propertyList.map((item) => ({
-        label: item.visible_name,
-        value: item.name + 'raw',
-      }))
-
-      const filterPropertyOptions: Array<SelectableValue<string>> = filterPropertyList.map((item) => ({
-        label: item.visible_name,
-        value: item.name + 'raw',
-      }))
-
-      setLists((prev) => ({
-        ...prev,
-        properties: propertyOptions,
-        filterProperties: filterPropertyOptions,
-      }))
-    }
-  }, [isRawMode])
-
-  useEffect(() => {
-    if (isTextMode) {
+    if (isTextMode || isRawMode) {
       const propertyOptions: Array<SelectableValue<string>> = propertyList.map((item) => ({
         label: item.visible_name,
         value: item.name,
@@ -217,7 +195,7 @@ export function QueryEditor({ query, onChange, onRunQuery, datasource }: Props) 
         filterProperties: filterPropertyOptions,
       }))
     }
-  }, [isTextMode])
+  }, [isTextMode, isRawMode])
 
   /* ######################################## QUERY  ############################################### */
 
@@ -229,23 +207,46 @@ export function QueryEditor({ query, onChange, onRunQuery, datasource }: Props) 
     onRunQuery()
   }
 
-  // Add other onChange handlers for Select components
   const onGroupChange = (value: SelectableValue<string>) => {
     onChange({
       ...query,
       group: value.value!,
+      device: '',
+      sensor: '',
+      channel: '',
+      objid: '',
     })
+
     setGroup(value.value!)
-    onRunQuery()
+    setDevice('')
+    setSensor('')
+    setChannel('')
+    setObjid('')
+
+    setLists((prev) => ({
+      ...prev,
+      devices: [],
+      sensors: [],
+      channels: [],
+    }))
   }
 
   const onDeviceChange = (value: SelectableValue<string>) => {
     onChange({
       ...query,
       device: value.value!,
+      sensor: '',
+      channel: '',
     })
     setDevice(value.value!)
-    onRunQuery()
+    setSensor('')
+    setChannel('')
+
+    setLists((prev) => ({
+      ...prev,
+      sensors: [],
+      channels: [],
+    }))
   }
 
   const findSensorObjid = async (sensorName: string) => {
@@ -274,14 +275,23 @@ export function QueryEditor({ query, onChange, onRunQuery, datasource }: Props) 
       ...query,
       sensor: value.value!,
       objid: sensorObjid,
+      channel: '',
     })
     setSensor(value.value!)
     setObjid(sensorObjid)
+    setChannel('')
+
+    setLists((prev) => ({
+      ...prev,
+      channels: [],
+    }))
+
     onRunQuery()
   }
 
   const onChannelChange = (value: SelectableValue<string>) => {
     onChange({ ...query, channel: value.value! })
+    setChannel(value.value!)
     onRunQuery()
   }
 
@@ -311,121 +321,150 @@ export function QueryEditor({ query, onChange, onRunQuery, datasource }: Props) 
   }
 
   return (
-    <Stack direction="column" gap={1}>
-      <Stack direction="column" gap={1}>
-        <InlineField label="Query Type" labelWidth={20} grow>
-          <Select options={queryTypeOptions} value={query.queryType} onChange={onQueryTypeChange} width={47} />
-        </InlineField>
+    <Stack direction="column" gap={2}>
+      {/* Erste Zeile: Query- und Sensorfelder */}
+      <Stack direction="row" gap={2}>
+        {/* Linke Spalte */}
+        <Stack direction="column" gap={1}>
+          <InlineField label="Query Type" labelWidth={20} grow>
+            <Select
+              options={queryTypeOptions}
+              value={query.queryType}
+              onChange={onQueryTypeChange}
+              width={47}
+            />
+          </InlineField>
 
-        <InlineField label="Group" labelWidth={20} grow>
-          <Select
-            isLoading={isLoading}
-            options={lists.groups}
-            value={query.group}
-            onChange={onGroupChange}
-            width={47}
-            allowCustomValue
-            isClearable
-            isDisabled={!query.queryType}
-            placeholder="Select Group or type '*'"
-          />
-        </InlineField>
-        <InlineField label="Device" labelWidth={20} grow>
-          <Select
-            isLoading={!lists.devices.length}
-            options={lists.devices}
-            value={query.device}
-            onChange={onDeviceChange}
-            width={47}
-            allowCustomValue
-            placeholder="Select Device or type '*'"
-            isClearable
-            isDisabled={!query.group}
-          />
-        </InlineField>
-      </Stack>
-      <Stack direction="column" gap={1}>
-        <InlineField label="Sensor" labelWidth={20} grow>
-          <Select
-            isLoading={!lists.sensors.length}
-            options={lists.sensors}
-            value={query.sensor}
-            onChange={onSensorChange}
-            width={47}
-            allowCustomValue
-            placeholder="Select Sensor or type '*'"
-            isClearable
-            isDisabled={!query.device}
-          />
-        </InlineField>
+          <InlineField label="Group" labelWidth={20} grow>
+            <Select
+              isLoading={isLoading}
+              options={lists.groups}
+              value={query.group}
+              onChange={onGroupChange}
+              width={47}
+              allowCustomValue
+              isClearable
+              isDisabled={!query.queryType}
+              placeholder="Select Group or type '*'"
+            />
+          </InlineField>
 
-        <InlineField label="Channel" labelWidth={20} grow>
-          <Select
-            isLoading={!lists.channels.length}
-            options={lists.channels}
-            value={query.channel}
-            onChange={onChannelChange}
-            width={47}
-            allowCustomValue
-            placeholder="Select Channel or type '*'"
-            isClearable
-            isDisabled={!query.sensor}
-          />
-        </InlineField>
-      </Stack>
+          <InlineField label="Device" labelWidth={20} grow>
+            <Select
+              isLoading={!lists.devices.length}
+              options={lists.devices}
+              value={query.device}
+              onChange={onDeviceChange}
+              width={47}
+              allowCustomValue
+              placeholder="Select Device or type '*'"
+              isClearable
+              isDisabled={!query.group}
+            />
+          </InlineField>
+        </Stack>
 
-      {isMetricsMode && (
-        <FieldSet label="Options">
-          <Stack direction="row" gap={1}>
-            <InlineField label="Include Group" labelWidth={16}>
-              <InlineSwitch value={query.includeGroupName || false} onChange={onIncludeGroupName} />
-            </InlineField>
+        {/* Rechte Spalte */}
+        <Stack direction="column" gap={2}>
+          <InlineField label="Sensor" labelWidth={20} grow>
+            <Select
+              isLoading={!lists.sensors.length}
+              options={lists.sensors}
+              value={query.sensor}
+              onChange={onSensorChange}
+              width={47}
+              allowCustomValue
+              placeholder="Select Sensor or type '*'"
+              isClearable
+              isDisabled={!query.device}
+            />
+          </InlineField>
 
-            <InlineField label="Include Device" labelWidth={15}>
-              <InlineSwitch value={query.includeDeviceName || false} onChange={onIncludeDeviceName} />
-            </InlineField>
-
-            <InlineField label="Include Sensor" labelWidth={15}>
-              <InlineSwitch value={query.includeSensorName || false} onChange={onIncludeSensorName} />
-            </InlineField>
-          </Stack>
-        </FieldSet>
-      )}
-
-      {isTextMode && (
-        <FieldSet label="Options">
-          <Stack direction="row" gap={1}>
-            <InlineField label="Property" labelWidth={16}>
-              <Select options={lists.properties} value={query.property} onChange={onPropertyChange} width={32} />
-            </InlineField>
-            <InlineField label="Filter Property" labelWidth={16}>
+          {isMetricsMode && (
+            <InlineField label="Channel" labelWidth={20} grow>
               <Select
-                options={lists.filterProperties}
-                value={query.filterProperty}
-                onChange={onFilterPropertyChange}
-                width={32}
+                isLoading={!lists.channels.length}
+                options={lists.channels}
+                value={query.channel}
+                onChange={onChannelChange}
+                width={47}
+                allowCustomValue
+                placeholder="Select Channel or type '*'"
+                isClearable
+                isDisabled={!query.sensor}
               />
             </InlineField>
-          </Stack>
-        </FieldSet>
-      )}
-      {isRawMode && (
-        <FieldSet label="Options">
-          <Stack direction="row" gap={1}>
-            <InlineField label="Property" labelWidth={16}>
-              <Select options={lists.properties} value={query.property} onChange={onPropertyChange} width={32} />
-            </InlineField>
-            <InlineField label="Filter Property" labelWidth={16}>
-              <Select
-                options={lists.filterProperties}
-                value={query.filterProperty}
-                onChange={onFilterPropertyChange}
-                width={32}
-              />
-            </InlineField>
-          </Stack>
-        </FieldSet>
-      )}
+          )}
+        </Stack>
+      </Stack>
+
+      {/* Zweite Zeile: Options */}
+      <Stack direction="column" gap={1}>
+        {isMetricsMode && (
+          <FieldSet label="Options">
+            <Stack direction="row" gap={1}>
+              <InlineField label="Include Group" labelWidth={16}>
+                <InlineSwitch value={query.includeGroupName || false} onChange={onIncludeGroupName} />
+              </InlineField>
+
+              <InlineField label="Include Device" labelWidth={15}>
+                <InlineSwitch value={query.includeDeviceName || false} onChange={onIncludeDeviceName} />
+              </InlineField>
+
+              <InlineField label="Include Sensor" labelWidth={15}>
+                <InlineSwitch value={query.includeSensorName || false} onChange={onIncludeSensorName} />
+              </InlineField>
+            </Stack>
+          </FieldSet>
+        )}
+
+        {isTextMode && (
+          <FieldSet label="Options">
+            <Stack direction="row" gap={1}>
+              <InlineField label="Property" labelWidth={16}>
+                <Select
+                  options={lists.properties}
+                  value={query.property}
+                  onChange={onPropertyChange}
+                  width={32}
+                />
+              </InlineField>
+              <InlineField label="Filter Property" labelWidth={16}>
+                <Select
+                  options={lists.filterProperties}
+                  value={query.filterProperty}
+                  onChange={onFilterPropertyChange}
+                  width={32}
+                />
+              </InlineField>
+            </Stack>
+          </FieldSet>
+        )}
+
+        {isRawMode && (
+          <FieldSet label="Options">
+            <Stack direction="row" gap={1}>
+              <InlineField label="Property" labelWidth={16}>
+                <Select
+                  options={lists.properties}
+                  value={query.property}
+                  onChange={onPropertyChange}
+                  width={32}
+                />
+              </InlineField>
+              <InlineField label="Filter Property" labelWidth={16}>
+                <Select
+                  options={lists.filterProperties}
+                  value={query.filterProperty}
+                  onChange={onFilterPropertyChange}
+                  width={32}
+                />
+              </InlineField>
+            </Stack>
+          </FieldSet>
+        )}
+      </Stack>
     </Stack>
+
   )
 }

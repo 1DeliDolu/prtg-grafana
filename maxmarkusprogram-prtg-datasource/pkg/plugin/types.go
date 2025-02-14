@@ -5,6 +5,7 @@ import (
 )
 
 // PrtgTableListResponse repräsentiert die Antwort der PRTG Table List API.
+// Hinweis: Prüfe, ob "prtg-version" als Array oder String geliefert wird.
 type PrtgTableListResponse struct {
 	PrtgVersion []PrtgStatusListResponse   `json:"prtg-version" xml:"prtg-version"`
 	TreeSize    int64                      `json:"treesize" xml:"treesize"`
@@ -14,14 +15,16 @@ type PrtgTableListResponse struct {
 	Values      []PrtgChannelsListResponse `json:"channels,omitempty" xml:"channels,omitempty"`
 }
 
-// ########################## GROUP LIST RESPONSE ##########################
+//############################# GROUP LIST RESPONSE ####################################
 
+// PrtgGroupListResponse repräsentiert die Antwort für Gruppen.
 type PrtgGroupListResponse struct {
 	PrtgVersion string                    `json:"prtg-version" xml:"prtg-version"`
 	TreeSize    int64                     `json:"treesize" xml:"treesize"`
 	Groups      []PrtgGroupListItemStruct `json:"groups" xml:"groups"`
 }
 
+// PrtgGroupListItemStruct enthält Details zu einer einzelnen Gruppe.
 type PrtgGroupListItemStruct struct {
 	Active         bool    `json:"active" xml:"active"`
 	ActiveRAW      int     `json:"active_raw" xml:"active_raw"`
@@ -59,14 +62,16 @@ type PrtgGroupListItemStruct struct {
 	WarnsensRAW    int     `json:"warnsens_raw" xml:"warnsens_raw"`
 }
 
-// ########################## DEVICE LIST RESPONSE ##########################
+//############################# DEVICE LIST RESPONSE ####################################
 
+// PrtgDevicesListResponse repräsentiert die Antwort für Geräte.
 type PrtgDevicesListResponse struct {
 	PrtgVersion string                     `json:"prtg-version" xml:"prtg-version"`
 	TreeSize    int64                      `json:"treesize" xml:"treesize"`
 	Devices     []PrtgDeviceListItemStruct `json:"devices" xml:"devices"`
 }
 
+// PrtgDeviceListItemStruct enthält Details zu einem einzelnen Gerät.
 type PrtgDeviceListItemStruct struct {
 	Active         bool    `json:"active" xml:"active"`
 	ActiveRAW      int     `json:"active_raw" xml:"active_raw"`
@@ -104,14 +109,16 @@ type PrtgDeviceListItemStruct struct {
 	WarnsensRAW    int     `json:"warnsens_raw" xml:"warnsens_raw"`
 }
 
-// ########################## SENSOR LIST RESPONSE ##########################
+//############################# SENSOR LIST RESPONSE ####################################
 
+// PrtgSensorsListResponse repräsentiert die Antwort für Sensoren.
 type PrtgSensorsListResponse struct {
 	PrtgVersion string                     `json:"prtg-version" xml:"prtg-version"`
 	TreeSize    int64                      `json:"treesize" xml:"treesize"`
 	Sensors     []PrtgSensorListItemStruct `json:"sensors" xml:"sensors"`
 }
 
+// PrtgSensorListItemStruct enthält Details zu einem einzelnen Sensor.
 type PrtgSensorListItemStruct struct {
 	Active         bool    `json:"active" xml:"active"`
 	ActiveRAW      int     `json:"active_raw" xml:"active_raw"`
@@ -149,8 +156,9 @@ type PrtgSensorListItemStruct struct {
 	WarnsensRAW    int     `json:"warnsens_raw" xml:"warnsens_raw"`
 }
 
-// ########################## STATUS LIST RESPONSE ##########################
+//############################# STATUS LIST RESPONSE ####################################
 
+// PrtgStatusListResponse enthält systemweite Statusinformationen.
 type PrtgStatusListResponse struct {
 	PrtgVersion          string `json:"prtgversion" xml:"prtg-version"`
 	AckAlarms            string `json:"ackalarms" xml:"ackalarms"`
@@ -187,30 +195,35 @@ type PrtgStatusListResponse struct {
 	WarnSens             string `json:"warnsens"`
 }
 
-// ########################## CHANNEL LIST RESPONSE ##########################
+//############################# CHANNEL LIST RESPONSE ####################################
 
+// PrtgChannelsListResponse repräsentiert die Antwort für Channel-Werte.
 type PrtgChannelsListResponse struct {
 	PrtgVersion string                   `json:"prtg-version" xml:"prtg-version"`
 	TreeSize    int64                    `json:"treesize" xml:"treesize"`
 	Values      []PrtgChannelValueStruct `json:"values" xml:"values"`
 }
 
+// PrtgChannelValueStruct wird als dynamische Map zur Speicherung von Channel-Daten verwendet.
 type PrtgChannelValueStruct map[string]interface{}
 
-// ########################## HISTORICAL DATA RESPONSE ##########################
+//############################# CHANNEL VALUE RESPONSE ####################################
 
+// PrtgHistoricalDataResponse enthält historische Werte eines Sensors.
 type PrtgHistoricalDataResponse struct {
 	PrtgVersion string       `json:"prtg-version" xml:"prtg-version"`
 	TreeSize    int64        `json:"treesize" xml:"treesize"`
 	HistData    []PrtgValues `json:"histdata" xml:"histdata"`
 }
 
+// PrtgValues enthält den Zeitstempel und dynamische Werte.
 type PrtgValues struct {
 	Datetime string                 `json:"datetime"`
 	Value    map[string]interface{} `json:"-"`
 }
 
-// Custom Unmarshal-Funktion, um dynamisch alle Felder außer "datetime" zu verarbeiten.
+// UnmarshalJSON implementiert ein benutzerdefiniertes Unmarshal-Verfahren,
+// das den "datetime"-Wert separat behandelt und den Rest in das Value-Feld packt.
 func (p *PrtgValues) UnmarshalJSON(data []byte) error {
 	var raw map[string]interface{}
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -224,13 +237,15 @@ func (p *PrtgValues) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-/* ########################## QUERY MODEL ########################## */
+/* ##################################### QUERY MODEL #################################### */
 
+// Datasource definiert grundlegende Parameter für die Datasource.
 type Datasource struct {
 	baseURL string
-	api   *Api
+	api     *Api
 }
 
+// Group, Device und Sensor dienen als einfache Strukturen zur Filterung.
 type Group struct {
 	Group string `json:"group"`
 }
@@ -243,23 +258,27 @@ type Sensor struct {
 	Sensor string `json:"sensor"`
 }
 
+// queryModel definiert das Datenmodell für Abfragen.
 type queryModel struct {
-	QueryType         string `json:"queryType"`
-	ObjectId          string `json:"objid"`
-	Group             string `json:"group"`
-	Device            string `json:"device"`
-	Sensor            string `json:"sensor"`
-	Channel           string `json:"channel"`
-	Property          string `json:"property"`
-	FilterProperty    string `json:"filterProperty"`
-	IncludeGroupName  bool   `json:"includeGroupName"`
-	IncludeDeviceName bool   `json:"includeDeviceName"`
-	IncludeSensorName bool   `json:"includeSensorName"`
-	Groups            []string
-	Devices           []string
-	Sensors           []string
-	From              int64  `json:"from"`
-	To                int64  `json:"to"`
+	QueryType         string   `json:"queryType"`
+	ObjectId          string   `json:"objid"`
+	Group             string   `json:"group"`
+	Device            string   `json:"device"`
+	Sensor            string   `json:"sensor"`
+	Channel           string   `json:"channel"`
+	Property          string   `json:"property"`
+	FilterProperty    string   `json:"filterProperty"`
+	IncludeGroupName  bool     `json:"includeGroupName"`
+	IncludeDeviceName bool     `json:"includeDeviceName"`
+	IncludeSensorName bool     `json:"includeSensorName"`
+	Groups            []string `json:"groups,omitempty"`
+	Devices           []string `json:"devices,omitempty"`
+	Sensors           []string `json:"sensors,omitempty"`
+	From              int64    `json:"from"`
+	To                int64    `json:"to"`
 }
 
+// MyDatasource kann für weitere interne Zwecke verwendet werden.
 type MyDatasource struct{}
+
+// 14.02.2025 13:49:00
