@@ -11,7 +11,6 @@ import (
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
 	"github.com/grafana/grafana-plugin-sdk-go/backend/instancemgmt"
-	"github.com/grafana/grafana-plugin-sdk-go/data"
 	"github.com/maxmarkusprogram/prtg/pkg/models"
 )
 
@@ -85,112 +84,6 @@ func parsePRTGDateTime(datetime string) (time.Time, string, error) {
 	return time.Time{}, "", fmt.Errorf("failed to parse time '%s': %w", datetime, parseErr)
 }
 
-// query processes a single query. If QueryType is "metrics", it creates a time series,
-// otherwise property-based queries are handled by handlePropertyQuery.
-func (d *Datasource) query(ctx context.Context, pCtx backend.PluginContext, query backend.DataQuery) backend.DataResponse {
-	var response backend.DataResponse
-	var qm queryModel
-
-	backend.Logger.Debug("Raw query parameters",
-		"timeRange", fmt.Sprintf("%v to %v", query.TimeRange.From, query.TimeRange.To),
-		"rawJSON", string(query.JSON))
-	if err := json.Unmarshal(query.JSON, &qm); err != nil {
-		return backend.ErrDataResponse(backend.StatusBadRequest, fmt.Sprintf("JSON unmarshal error: %v", err))
-	}
-
-	switch qm.QueryType {
-	case "metrics":
-		// Existing metrics handling code
-		fromTime := query.TimeRange.From.UnixMilli()
-		toTime := query.TimeRange.To.UnixMilli()
-
-		backend.Logger.Info("Fetching historical data",
-			"objectId", qm.ObjectId,
-			"channel", qm.Channel,
-			"from", fromTime,
-			"to", toTime)
-		historicalData, err := d.api.GetHistoricalData(qm.ObjectId, fromTime, toTime)
-		if err != nil {
-			backend.Logger.Error("API request failed", "error", err)
-			return backend.ErrDataResponse(backend.StatusBadRequest, fmt.Sprintf("API request failed: %v", err))
-		}
-		backend.Logger.Info("Received historical data", "dataPoints", len(historicalData.HistData))
-
-		// Assumption: historicalData.Treesize contains the value from the JSON ("treesize")
-		times := make([]time.Time, 0, len(historicalData.HistData))
-		values := make([]float64, 0, len(historicalData.HistData))
-
-		backend.Logger.Debug("Parsing historical data", "channel", len(times))
-
-		for _, item := range historicalData.HistData {
-			parsedTime, _, err := parsePRTGDateTime(item.Datetime)
-			if err != nil {
-				backend.Logger.Warn("Date parsing failed", "datetime", item.Datetime, "error", err)
-				continue
-			}
-			if val, ok := item.Value[qm.Channel]; ok {
-				switch v := val.(type) {
-				case float64:
-					values = append(values, v)
-				case string:
-					if floatVal, err := strconv.ParseFloat(v, 64); err == nil {
-						values = append(values, floatVal)
-					} else {
-						backend.Logger.Warn("Cannot convert value to float64", "value", v, "error", err)
-						continue
-					}
-				default:
-					backend.Logger.Warn("Unexpected value type", "type", fmt.Sprintf("%T", v), "value", v)
-					continue
-				}
-				times = append(times, parsedTime)
-			} else {
-				backend.Logger.Warn("Channel not found in item.Value, using default value", "channel", qm.Channel)
-				times = append(times, parsedTime)
-				values = append(values, 0.0)
-			}
-		}
-
-		var parts []string
-		if qm.IncludeGroupName && qm.Group != "" {
-			parts = append(parts, qm.Group)
-		}
-		if qm.IncludeDeviceName && qm.Device != "" {
-			parts = append(parts, qm.Device)
-		}
-		if qm.IncludeSensorName && qm.Sensor != "" {
-			parts = append(parts, qm.Sensor)
-		}
-		parts = append(parts, qm.Channel)
-		displayName := strings.Join(parts, " - ")
-
-		frame := data.NewFrame("response",
-			data.NewField("Time", nil, times),
-			data.NewField("Value", nil, values).SetConfig(&data.FieldConfig{
-				DisplayName: displayName,
-			}),
-		)
-
-		response.Frames = append(response.Frames, frame)
-
-	case "text":
-		// Handle text mode by using the non-raw property
-		return d.handlePropertyQuery(qm, qm.FilterProperty)
-
-	case "raw":
-		// Handle raw mode by appending "_raw" to the filter property
-		rawProperty := qm.FilterProperty
-		if !strings.HasSuffix(rawProperty, "_raw") {
-			rawProperty += "_raw"
-		}
-		return d.handlePropertyQuery(qm, rawProperty)
-
-	default:
-		return backend.ErrDataResponse(backend.StatusBadRequest, fmt.Sprintf("Unknown query type: %s", qm.QueryType))
-	}
-
-	return response
-}
 
 // CheckHealth checks the plugin configuration.
 func (d *Datasource) CheckHealth(ctx context.Context, req *backend.CheckHealthRequest) (*backend.CheckHealthResult, error) {
