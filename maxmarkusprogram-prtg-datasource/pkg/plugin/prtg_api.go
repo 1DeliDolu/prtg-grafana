@@ -32,7 +32,7 @@ func NewApi(baseURL, apiKey string, cacheTime, requestTimeout time.Duration) *Ap
 	}
 }
 
-// buildApiUrl creates a standardized PRTG API URL with given parameters.
+// buildApiUrl creates a standardized PRTG API URL with the given parameters.
 func (a *Api) buildApiUrl(method string, params map[string]string) (string, error) {
 	baseUrl := fmt.Sprintf("%s/api/%s", a.baseURL, method)
 	u, err := url.Parse(baseUrl)
@@ -51,14 +51,14 @@ func (a *Api) buildApiUrl(method string, params map[string]string) (string, erro
 	return u.String(), nil
 }
 
-// SetTimeout aktualisiert das Timeout für API-Anfragen.
+// SetTimeout updates the timeout for API requests.
 func (a *Api) SetTimeout(timeout time.Duration) {
 	if timeout > 0 {
 		a.timeout = timeout
 	}
 }
 
-// baseExecuteRequest führt die HTTP-Anfrage durch und liefert den Response-Body.
+// baseExecuteRequest executes the HTTP request and returns the response body.
 func (a *Api) baseExecuteRequest(endpoint string, params map[string]string) ([]byte, error) {
 	apiUrl, err := a.buildApiUrl(endpoint, params)
 	if err != nil {
@@ -104,7 +104,7 @@ func (a *Api) baseExecuteRequest(endpoint string, params map[string]string) ([]b
 	return body, nil
 }
 
-// GetStatusList ruft die Statusliste der PRTG-API ab.
+// GetStatusList retrieves the status list from the PRTG API.
 func (a *Api) GetStatusList() (*PrtgStatusListResponse, error) {
 	body, err := a.baseExecuteRequest("status.json", nil)
 	if err != nil {
@@ -118,7 +118,7 @@ func (a *Api) GetStatusList() (*PrtgStatusListResponse, error) {
 	return &response, nil
 }
 
-// GetGroups ruft die Gruppenliste ab.
+// GetGroups retrieves the group list.
 func (a *Api) GetGroups() (*PrtgGroupListResponse, error) {
 	params := map[string]string{
 		"content": "groups",
@@ -139,7 +139,7 @@ func (a *Api) GetGroups() (*PrtgGroupListResponse, error) {
 	return &response, nil
 }
 
-// GetDevices ruft die Geräte-Liste ab.
+// GetDevices retrieves the device list.
 func (a *Api) GetDevices() (*PrtgDevicesListResponse, error) {
 	params := map[string]string{
 		"content": "devices",
@@ -160,7 +160,7 @@ func (a *Api) GetDevices() (*PrtgDevicesListResponse, error) {
 	return &response, nil
 }
 
-// GetSensors ruft die Sensoren-Liste ab.
+// GetSensors retrieves the sensor list.
 func (a *Api) GetSensors() (*PrtgSensorsListResponse, error) {
 	params := map[string]string{
 		"content": "sensors",
@@ -183,7 +183,7 @@ func (a *Api) GetSensors() (*PrtgSensorsListResponse, error) {
 	return &response, nil
 }
 
-// GetChannels ruft die Channel-Werte für die angegebene objid ab.
+// GetChannels retrieves the channel values for the given objid.
 func (a *Api) GetChannels(objid string) (*PrtgChannelValueStruct, error) {
 	params := map[string]string{
 		"content":    "values",
@@ -198,7 +198,7 @@ func (a *Api) GetChannels(objid string) (*PrtgChannelValueStruct, error) {
 		return nil, err
 	}
 
-	// Optional: Rohantwort in eine Datei schreiben (für Debugging)
+	// Optional: Write raw response to a file (for debugging)
 	if err := os.WriteFile("channel_response.txt", body, 0644); err != nil {
 		backend.Logger.Warn("Could not save channel response to file", "error", err)
 	}
@@ -211,7 +211,7 @@ func (a *Api) GetChannels(objid string) (*PrtgChannelValueStruct, error) {
 	return &response, nil
 }
 
-// GetHistoricalData ruft historische Daten für den angegebenen Sensor und Zeitraum ab.
+// GetHistoricalData retrieves historical data for the specified sensor and time range.
 func (a *Api) GetHistoricalData(sensorID string, startDate, endDate int64) (*PrtgHistoricalDataResponse, error) {
 	backend.Logger.Info("GetHistoricalData called", "sensorID", sensorID, "startDate", startDate, "endDate", endDate)
 
@@ -284,7 +284,7 @@ func (a *Api) GetHistoricalData(sensorID string, startDate, endDate int64) (*Prt
 
 	backend.Logger.Info("Historical data response received successfully")
 
-	// Optional: Rohantwort in eine Datei schreiben (für Debugging)
+	// Optional: Write raw response to a file (for debugging)
 	if err := os.WriteFile("historical_data_response.txt", body, 0644); err != nil {
 		backend.Logger.Warn("Could not save historical data response to file", "error", err)
 	}
@@ -295,13 +295,12 @@ func (a *Api) GetHistoricalData(sensorID string, startDate, endDate int64) (*Prt
 	backend.Logger.Info("First datetime in response", "datetime", response.HistData[0].Datetime)
 
 	return &response, nil
-	// 14.02.2025 13:49:00
 }
 
-// Yardımcı fonksiyon: string'i int'e çevirir, hata durumunda varsayılan değeri döner
+// Helper function: Converts a string to an int; returns the default value in case of error.
 func mustParseInt(s string, defaultVal int64) int64 {
 	if s == "0" {
-		return 60 // Ham veri için 1 dakikalık aralık varsayıyoruz
+		return 60 // Assuming a 1-minute interval for raw data.
 	}
 	val, err := strconv.ParseInt(s, 10, 64)
 	if err != nil {
