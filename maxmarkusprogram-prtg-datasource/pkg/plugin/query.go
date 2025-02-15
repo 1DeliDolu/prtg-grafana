@@ -13,16 +13,16 @@ import (
 	"golang.org/x/text/language"
 )
 
-// PRTGAPI definiert die Schnittstelle für API-Operationen.
+// PRTGAPI defines the interface for API operations.
 type PRTGAPI interface {
 	GetGroups() (*PrtgGroupListResponse, error)
 	GetDevices() (*PrtgDevicesListResponse, error)
 	GetSensors() (*PrtgSensorsListResponse, error)
-	// Zusätzliche Methoden wie GetTextData, GetPropertyData etc. können hier deklariert werden.
+	// Additional methods like GetTextData, GetPropertyData, etc. can be declared here.
 }
 
-// handlePropertyQuery verarbeitet eine Eigenschaftsanfrage anhand des queryModel (qm)
-// und eines Filter-Properties.
+// handlePropertyQuery processes a property query based on the queryModel (qm)
+// and a filter property.
 func (d *Datasource) handlePropertyQuery(qm queryModel, filterProperty string) backend.DataResponse {
 	var response backend.DataResponse
 	var times []time.Time
@@ -46,7 +46,7 @@ func (d *Datasource) handlePropertyQuery(qm queryModel, filterProperty string) b
 					continue
 				}
 
-				// Get the property value based on filterProperty
+				// Retrieve the property value based on filterProperty
 				var value interface{}
 				switch filterProperty {
 				case "active":
@@ -146,7 +146,7 @@ func (d *Datasource) handlePropertyQuery(qm queryModel, filterProperty string) b
 					continue
 				}
 
-				// Get the value based on filterProperty
+				// Retrieve the value based on filterProperty
 				var value interface{}
 				switch filterProperty {
 				case "status", "status_raw":
@@ -192,14 +192,13 @@ func (d *Datasource) handlePropertyQuery(qm queryModel, filterProperty string) b
 				}
 			}
 		}
-
 	}
 
-	// Create frame with proper field configuration
+	// Create a frame with proper field configuration
 	if len(times) > 0 && len(values) > 0 {
 		timeField := data.NewField("Time", nil, times)
 
-		// Determine the type of values and create appropriate field
+		// Determine the type of values and create an appropriate field
 		var valueField *data.Field
 		if len(values) > 0 {
 			switch values[0].(type) {
@@ -253,7 +252,7 @@ func (d *Datasource) handlePropertyQuery(qm queryModel, filterProperty string) b
 	return response
 }
 
-// Move GetPropertyValue to be a method of Datasource
+// GetPropertyValue retrieves the property value from an item using reflection.
 func (d *Datasource) GetPropertyValue(property string, item interface{}) string {
 	v := reflect.ValueOf(item)
 	if v.Kind() == reflect.Ptr {
@@ -266,12 +265,12 @@ func (d *Datasource) GetPropertyValue(property string, item interface{}) string 
 	fieldName := cases.Title(language.English).String(baseProperty)
 	// First letter to uppercase for matching struct field names
 
-	// Add proper suffix based on request type
+	// Append proper suffix based on request type
 	if isRawRequest {
 		fieldName += "_raw" // Use lowercase suffix as in JSON
 	}
 
-	// Get the field using the exact field name from JSON
+	// Retrieve the field using the exact field name from JSON
 	field := v.FieldByName(fieldName)
 	if !field.IsValid() {
 		// Try alternative field names if the first attempt fails
@@ -295,7 +294,7 @@ func (d *Datasource) GetPropertyValue(property string, item interface{}) string 
 		return "Unknown"
 	}
 
-	// Convert the value to string based on the field's type
+	// Convert the value to a string based on the field's type
 	val := field.Interface()
 	switch v := val.(type) {
 	case int:
@@ -320,7 +319,7 @@ func (d *Datasource) GetPropertyValue(property string, item interface{}) string 
 	}
 }
 
-// Helper function to clean HTML from message
+// cleanMessageHTML is a helper function that removes HTML from a message.
 func cleanMessageHTML(message string) string {
 	message = strings.ReplaceAll(message, `<div class="status">`, "")
 	message = strings.ReplaceAll(message, `<div class="moreicon">`, "")
@@ -328,7 +327,7 @@ func cleanMessageHTML(message string) string {
 	return strings.TrimSpace(message)
 }
 
-// isValidPropertyType checks if the given property type and name are valid
+// isValidPropertyType checks if the given property type and name are valid.
 func (d *Datasource) isValidPropertyType(propertyType string) bool {
 	validProperties := []string{
 		"group", "device", "sensor", // object types
