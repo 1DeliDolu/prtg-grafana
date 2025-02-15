@@ -15,15 +15,15 @@ import (
 	"github.com/grafana/grafana-plugin-sdk-go/backend/log"
 )
 
-// Api hält API-bezogene Konfigurationen.
+// Api holds API-related configurations.
 type Api struct {
 	baseURL string
 	apiKey  string
 	timeout time.Duration
 }
 
-// NewApi erstellt eine neue Api-Instanz.
-// Hier wird requestTimeout als Timeout für API-Anfragen genutzt.
+// NewApi creates a new Api instance.
+// requestTimeout is used as timeout for API requests.
 func NewApi(baseURL, apiKey string, cacheTime, requestTimeout time.Duration) *Api {
 	return &Api{
 		baseURL: baseURL,
@@ -32,7 +32,7 @@ func NewApi(baseURL, apiKey string, cacheTime, requestTimeout time.Duration) *Ap
 	}
 }
 
-// buildApiUrl erstellt eine standardisierte PRTG-API-URL mit übergebenen Parametern.
+// buildApiUrl creates a standardized PRTG API URL with given parameters.
 func (a *Api) buildApiUrl(method string, params map[string]string) (string, error) {
 	baseUrl := fmt.Sprintf("%s/api/%s", a.baseURL, method)
 	u, err := url.Parse(baseUrl)
@@ -68,7 +68,7 @@ func (a *Api) baseExecuteRequest(endpoint string, params map[string]string) ([]b
 	client := &http.Client{
 		Timeout: a.timeout,
 		Transport: &http.Transport{
-			// Achtung: InsecureSkipVerify sollte in Produktionsumgebungen überprüft werden!
+			// Warning: InsecureSkipVerify should be reviewed in production environments!
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 		},
 	}

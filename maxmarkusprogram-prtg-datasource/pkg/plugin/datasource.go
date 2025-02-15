@@ -15,7 +15,7 @@ import (
 	"github.com/maxmarkusprogram/prtg/pkg/models"
 )
 
-// Aşağıdaki satırlarla Datasource, gerekli Grafana SDK arayüzlerini implemente ettiğinden emin oluyoruz.
+// Ensure Datasource implements required Grafana SDK interfaces
 var (
 	_ backend.QueryDataHandler      = (*Datasource)(nil)
 	_ backend.CheckHealthHandler    = (*Datasource)(nil)
@@ -23,7 +23,7 @@ var (
 	_ backend.CallResourceHandler   = (*Datasource)(nil)
 )
 
-// NewDatasource, plugin ayarlarından verileri çekerek yeni bir datasource örneği oluşturur.
+// NewDatasource creates a new datasource instance by extracting data from plugin settings.
 func NewDatasource(ctx context.Context, settings backend.DataSourceInstanceSettings) (instancemgmt.Instance, error) {
 	config, err := models.LoadPluginSettings(settings)
 	if err != nil {
@@ -32,7 +32,7 @@ func NewDatasource(ctx context.Context, settings backend.DataSourceInstanceSetti
 	baseURL := fmt.Sprintf("https://%s", config.Path)
 	backend.Logger.Info("Base URL", "url", baseURL)
 
-	// Eğer cache zamanı tanımlı değilse varsayılan 30 saniye kullanılır.
+	// If cache time is not defined, default to 30 seconds
 	cacheTime := config.CacheTime
 	if cacheTime <= 0 {
 		cacheTime = 30 * time.Second
@@ -44,16 +44,15 @@ func NewDatasource(ctx context.Context, settings backend.DataSourceInstanceSetti
 	}, nil
 }
 
-// Dispose, datasource ayarları değiştiğinde çağrılır.
+// Dispose is called when the datasource settings are changed.
 func (d *Datasource) Dispose() {
-	// Gerekirse kaynak temizleme işlemleri yapılabilir.
 }
 
-// QueryData, gelen sorguları işler ve sonuçları döner.
+// QueryData processes incoming queries and returns the results.
 func (d *Datasource) QueryData(ctx context.Context, req *backend.QueryDataRequest) (*backend.QueryDataResponse, error) {
 	response := backend.NewQueryDataResponse()
 
-	// Her sorgu için query metodunu çağırıyoruz.
+	// Call the query method for each query.
 	for _, q := range req.Queries {
 		res := d.query(ctx, req.PluginContext, q)
 		response.Responses[q.RefID] = res
@@ -62,7 +61,7 @@ func (d *Datasource) QueryData(ctx context.Context, req *backend.QueryDataReques
 	return response, nil
 }
 
-// parsePRTGDateTime parses PRTG datetime strings in various formats
+// parsePRTGDateTime parses PRTG datetime strings in various formats.
 func parsePRTGDateTime(datetime string) (time.Time, string, error) {
 	// Try different known PRTG date formats
 	layouts := []string{
@@ -86,8 +85,8 @@ func parsePRTGDateTime(datetime string) (time.Time, string, error) {
 	return time.Time{}, "", fmt.Errorf("failed to parse time '%s': %w", datetime, parseErr)
 }
 
-// query, tek bir sorguyu işler. Eğer QueryType "metrics" ise zaman serisi oluşturur,
-// aksi halde property bazlı sorgular handlePropertyQuery ile işlenir.
+// query processes a single query. If QueryType is "metrics", it creates a time series,
+// otherwise property-based queries are handled by handlePropertyQuery.
 func (d *Datasource) query(ctx context.Context, pCtx backend.PluginContext, query backend.DataQuery) backend.DataResponse {
 	var response backend.DataResponse
 	var qm queryModel
@@ -117,7 +116,7 @@ func (d *Datasource) query(ctx context.Context, pCtx backend.PluginContext, quer
 		}
 		backend.Logger.Info("Received historical data", "dataPoints", len(historicalData.HistData))
 
-		// Annahme: historicalData.Treesize enthält den Wert aus dem JSON ("treesize")
+		// Assumption: historicalData.Treesize contains the value from the JSON ("treesize")
 		times := make([]time.Time, 0, len(historicalData.HistData))
 		values := make([]float64, 0, len(historicalData.HistData))
 
@@ -193,7 +192,7 @@ func (d *Datasource) query(ctx context.Context, pCtx backend.PluginContext, quer
 	return response
 }
 
-// CheckHealth, plugin konfigürasyonunu kontrol eder.
+// CheckHealth checks the plugin configuration.
 func (d *Datasource) CheckHealth(ctx context.Context, req *backend.CheckHealthRequest) (*backend.CheckHealthResult, error) {
 	res := &backend.CheckHealthResult{}
 
@@ -226,7 +225,7 @@ func (d *Datasource) CheckHealth(ctx context.Context, req *backend.CheckHealthRe
 	return res, nil
 }
 
-// CallResource, URL path'ine göre istekleri ilgili handler'lara yönlendirir.
+// CallResource routes requests to the appropriate handlers based on the URL path.
 func (d *Datasource) CallResource(ctx context.Context, req *backend.CallResourceRequest, sender backend.CallResourceResponseSender) error {
 	pathParts := strings.Split(req.Path, "/")
 	switch pathParts[0] {
@@ -353,5 +352,4 @@ func (d *Datasource) handleGetChannel(sender backend.CallResourceResponseSender,
 		Headers: map[string][]string{"Content-Type": {"application/json"}},
 		Body:    body,
 	})
-	// 14.02.2025 13:49:00
 }
