@@ -199,13 +199,34 @@ type PrtgStatusListResponse struct {
 
 // PrtgChannelsListResponse represents the response for channel values.
 type PrtgChannelsListResponse struct {
-	PrtgVersion string                   `json:"prtg-version" xml:"prtg-version"`
-	TreeSize    int64                    `json:"treesize" xml:"treesize"`
-	Values      []PrtgChannelValueStruct `json:"values" xml:"values"`
+    PrtgVersion string                   `json:"prtg-version" xml:"prtg-version"`
+    TreeSize    int64                    `json:"treesize" xml:"treesize"`
+    Values      []PrtgChannelValueStruct `json:"-" xml:"-"`
 }
 
 // PrtgChannelValueStruct is used as a dynamic map for storing channel data.
 type PrtgChannelValueStruct map[string]interface{}
+
+// UnmarshalJSON implements a custom unmarshal method,
+// which handles the "datetime" value separately and packs the rest into the Value field.
+func (p *PrtgChannelValueStruct) UnmarshalJSON(data []byte) error {
+    var raw map[string]interface{}
+    if err := json.Unmarshal(data, &raw); err != nil {
+        return err
+    }
+    
+    // Create a new map if p is nil
+    if *p == nil {
+        *p = make(PrtgChannelValueStruct)
+    }
+    
+    // Copy all values to the map
+    for k, v := range raw {
+        (*p)[k] = v
+    }
+    
+    return nil
+}
 
 //############################# CHANNEL VALUE RESPONSE ####################################
 

@@ -23,6 +23,7 @@ export interface MyQuery extends DataQuery {
   devices: Array<string>
   sensors: Array<string>
   channels: Array<string>
+
 }
 
 export interface DataPoint {

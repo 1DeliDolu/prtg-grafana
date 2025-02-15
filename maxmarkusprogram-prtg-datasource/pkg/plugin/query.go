@@ -1,8 +1,8 @@
 package plugin
 
 import (
-	"encoding/json"
 	"context"
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"strconv"
@@ -26,10 +26,13 @@ type PRTGAPI interface {
 // query processes a single query. If QueryType is "metrics", it creates a time series,
 // otherwise property-based queries are handled by handlePropertyQuery.
 func (d *Datasource) query(ctx context.Context, pCtx backend.PluginContext, query backend.DataQuery) backend.DataResponse {
-	_ = ctx // ! Unused parameter: ctx is intentionally not used.
-	
+	_ = ctx  // ! Unused parameter: ctx is intentionally not used.
+	_ = pCtx // ! Unused parameter: pCtx is intentionally not used.
+
 	var response backend.DataResponse
 	var qm queryModel
+
+
 
 	backend.Logger.Debug("Raw query parameters",
 		"timeRange", fmt.Sprintf("%v to %v", query.TimeRange.From, query.TimeRange.To),
