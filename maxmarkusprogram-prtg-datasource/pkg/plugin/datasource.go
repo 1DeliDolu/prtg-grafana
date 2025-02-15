@@ -118,7 +118,7 @@ func (d *Datasource) query(ctx context.Context, pCtx backend.PluginContext, quer
 		backend.Logger.Info("Received historical data", "dataPoints", len(historicalData.HistData))
 
 		// Annahme: historicalData.Treesize enthält den Wert aus dem JSON ("treesize")
-		times := make([]time.Time, 0,len(historicalData.HistData))
+		times := make([]time.Time, 0, len(historicalData.HistData))
 		values := make([]float64, 0, len(historicalData.HistData))
 
 		backend.Logger.Debug("Parsing historical data", "channel", len(times))

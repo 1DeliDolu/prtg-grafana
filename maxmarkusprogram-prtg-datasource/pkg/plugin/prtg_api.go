@@ -232,25 +232,24 @@ func (a *Api) GetHistoricalData(sensorID string, startDate, endDate int64) (*Prt
 		return nil, fmt.Errorf("invalid time range: start date %v must be before end date %v", startTime, endTime)
 	}
 
-
 	var avg string
 	switch {
 	case hours <= 24:
-		avg = "0" 
+		avg = "0"
 	case hours <= 48:
 		avg = "60"
 	case hours <= 72:
-		avg = "300" 
+		avg = "300"
 	case hours <= 168:
 		avg = "900"
 	case hours <= 336:
-		avg = "1800" 
+		avg = "1800"
 	case hours <= 720:
-		avg = "3600" 
+		avg = "3600"
 	case hours <= 1440:
-		avg = "7200" 
+		avg = "7200"
 	case hours <= 2160:
-		avg = "14400" 
+		avg = "14400"
 	default:
 		avg = "86400"
 	}
