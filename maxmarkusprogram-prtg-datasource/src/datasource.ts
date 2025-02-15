@@ -44,4 +44,8 @@ export class DataSource extends DataSourceWithBackend<MyQuery, MyDataSourceOptio
     }
     return this.getResource(`channels/${objid}`)
   }
+
+  //annotations
+  annotations = {
+  }
 }
